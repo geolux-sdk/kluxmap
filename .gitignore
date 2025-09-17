@@ -4,8 +4,7 @@ __pycache__/
 # ===== IDE 설정 파일 =====
 .vscode/
 log/
-proj/
-Flight_Data/
+test/
 
 # ===== 빌드 / 배포 =====
 build/
@@ -13,3 +12,9 @@ dist/
 KMagHunters.dist/
 KMagHunters.build/
 KMagHunters.onefile-build/
+*.spec
+*.xml
+
+*.csv
+*.xlxs
+*.json
