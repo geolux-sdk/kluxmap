@@ -111,9 +111,9 @@ class FlightPlotWidget(QWidget):
             lambda checked=False: DataSettingsDialog(parent=self).exec()
         )
 
-    def actionEnable(self):
-        self.actionOpenFileBrower.setEnabled(True)
-        self.actionDataConfiDisp.setEnabled(True)
+    def actionEnable(self, action=True):
+        self.actionOpenFileBrower.setEnabled(action)
+        self.actionDataConfiDisp.setEnabled(action)
 
     def createProjectLabel(self):
         # "프로젝트:" 텍스트를 위한 QLabel

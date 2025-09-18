@@ -9,6 +9,7 @@ from pykrige.ok import OrdinaryKriging
 from PySide6.QtCore import QObject, Qt, QTimer, Signal
 from PySide6.QtWidgets import (
     QApplication,
+    QButtonGroup,
     QCheckBox,
     QComboBox,
     QDialog,
@@ -23,6 +24,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPlainTextEdit,
     QPushButton,
+    QRadioButton,
     QVBoxLayout,
 )
 
@@ -940,6 +942,75 @@ class ConfigDataSettingsDialog(QDialog):
 
     def clear_bound_area(self):
         self.bound_text.clear()
+
+
+class CreateProjectDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Create Project Settings")
+
+        main_layout = QVBoxLayout(self)
+
+        # --- Bound Area Group ---
+        folder_group = QGroupBox("Project Folder Select:")
+
+        self.project_name = QLineEdit()
+        self.project_name.setMinimumWidth(300)
+        self.project_path = QLineEdit()
+        self.project_fullpath = QLabel()
+        open_button = QPushButton("Path")
+        open_button.clicked.connect(self.open_folder)
+
+        projfolder_layout = QFormLayout()
+        projfolder_layout.addRow("Name:", self.project_name)
+        projfolder_layout.addRow(open_button, self.project_path)
+        projfolder_layout.addRow("Full Path:", self.project_fullpath)
+
+        folder_group.setLayout(projfolder_layout)
+
+        direction_group = QGroupBox("Flight Direction:")
+        self.radio_nw = QRadioButton("NW")
+        radio_ew = QRadioButton("EW")
+        self.radio_nw.setChecked(True)
+        dir_button_group = QButtonGroup(direction_group)
+        dir_button_group.addButton(self.radio_nw)
+        dir_button_group.addButton(radio_ew)
+        dir_button_group.setExclusive(True)
+        hbox = QHBoxLayout()
+        hbox.addWidget(self.radio_nw)
+        hbox.addWidget(radio_ew)
+        direction_group.setLayout(hbox)
+
+        # --- Add Groups to Main Layout ---
+        main_layout.addWidget(folder_group)
+        main_layout.addWidget(direction_group)
+
+        # --- OK/Cancel Buttons ---
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        main_layout.addWidget(buttons)
+
+    def accept(self):
+        logger.debug("CreateProjectDialog accept called")
+        if not hasattr(self, "fullpath"):
+            return
+        self.selection = {"project_path": self.fullpath}
+        if self.radio_nw.isChecked():
+            self.selection["direction"] = "NW"
+        else:
+            self.selection["direction"] = "EW"
+        logger.info(f"selection: {self.selection}")
+        super().accept()
+
+    def open_folder(self):
+        folder_path = browse_directory(self)
+        if folder_path:
+            self.project_path.setText(folder_path)
+            self.fullpath = os.path.join(folder_path, self.project_name.text().strip())
+            self.project_fullpath.setText(self.fullpath)
 
 
 def browse_files(

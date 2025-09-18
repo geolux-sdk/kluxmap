@@ -100,9 +100,9 @@ class CalibrationFlightWidget(QWidget):
         self.actionOpenCaliFolder.setEnabled(False)
         self.actionImportCaliFile.setEnabled(False)
 
-    def actionEnable(self):
-        self.actionOpenCaliFolder.setEnabled(True)
-        self.actionImportCaliFile.setEnabled(True)
+    def actionEnable(self, action=True):
+        self.actionOpenCaliFolder.setEnabled(action)
+        self.actionImportCaliFile.setEnabled(action)
 
     def importCaliFile(self):
         logger.debug("importCaliFile")

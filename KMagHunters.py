@@ -30,7 +30,12 @@ from myConvertDlg import (
 )
 from myResource import load_SEC_file, make_project_subfolder, resource_path
 from mySettings import config, mySettings
-from myWidgets import ConfigDataSettingsDialog, browse_directory, browse_files
+from myWidgets import (
+    ConfigDataSettingsDialog,
+    CreateProjectDialog,
+    browse_directory,
+    browse_files,
+)
 
 SPLASH_IMAGE = "splash_screen.png"
 VIEWER_ICON = "viewer.png"
@@ -78,23 +83,6 @@ class KMagHunters(QMainWindow):
 
         self.connectSignals()
 
-    def connectSignals(self):
-        """모든 시그널-슬롯 연결"""
-        self.tabs.currentChanged.connect(self.on_tab_changed)
-        self.openProject_action.triggered.connect(self.openProjectFolder)
-        self.resetProject_action.triggered.connect(self.resetProjectFolder)
-        self.convert_action.triggered.connect(self.convertDataToCSV)
-        self.import_SEC_files_action.triggered.connect(self.import_SEC_files)
-        self.exit_action.triggered.connect(self.close)
-        self.config_action.triggered.connect(
-            lambda checked=False: ConfigDataSettingsDialog(self).exec()
-        )
-        self.about_action.triggered.connect(self.showAboutDialog)
-
-        for w in (self.FligtPlotWidget, self.CalibPlotWidget, self.LinePlotWidget):
-            self.projectOpened.connect(w.on_project_opened)
-            self.projectReset.connect(w.on_project_reset)
-
     def on_tab_changed(self, index):
         logger.debug(f"on_tab_changed {index} from {self._previous_tab_index}")
         if index == 2:
@@ -115,13 +103,17 @@ class KMagHunters(QMainWindow):
             event.accept()
         else:
             event.ignore()
-        self.settings.write(self.settings.settings)
 
     def createMenuBar(self):
         menu_bar = self.menuBar()
 
         # Project 메뉴
         project_menu = menu_bar.addMenu("&Project")
+
+        self.createProject_action = QAction("&Create Project Folder", self)
+        self.createProject_action.setShortcut("Ctrl+M")
+        self.createProject_action.setStatusTip("Create a project folder")
+        project_menu.addAction(self.createProject_action)
 
         self.openProject_action = QAction("&Open Project Folder", self)
         self.openProject_action.setShortcut("Ctrl+O")
@@ -132,6 +124,10 @@ class KMagHunters(QMainWindow):
         self.resetProject_action.setShortcut("Ctrl+R")
         self.resetProject_action.setStatusTip("Reset Data in project folder")
         project_menu.addAction(self.resetProject_action)
+
+        self.closeProject_action = QAction("Close Project Folder", self)
+        self.closeProject_action.setStatusTip("Close this project folder")
+        project_menu.addAction(self.closeProject_action)
 
         self.exit_action = QAction("&Exit", self)
         self.exit_action.setShortcut("Ctrl+X")
@@ -164,9 +160,29 @@ class KMagHunters(QMainWindow):
 
         # 초기 비활성화
         self.resetProject_action.setEnabled(False)
+        self.closeProject_action.setEnabled(False)
         self.convert_action.setEnabled(False)
         self.import_SEC_files_action.setEnabled(False)
         self.config_action.setEnabled(False)
+
+    def connectSignals(self):
+        """모든 시그널-슬롯 연결"""
+        self.tabs.currentChanged.connect(self.on_tab_changed)
+        self.createProject_action.triggered.connect(self.createProjectFolder)
+        self.openProject_action.triggered.connect(self.openProjectFolder)
+        self.resetProject_action.triggered.connect(self.resetProjectFolder)
+        self.closeProject_action.triggered.connect(self.closeProjectFolder)
+        self.convert_action.triggered.connect(self.convertDataToCSV)
+        self.import_SEC_files_action.triggered.connect(self.import_SEC_files)
+        self.exit_action.triggered.connect(self.close)
+        self.config_action.triggered.connect(
+            lambda checked=False: ConfigDataSettingsDialog(self).exec()
+        )
+        self.about_action.triggered.connect(self.showAboutDialog)
+
+        for w in (self.FligtPlotWidget, self.CalibPlotWidget, self.LinePlotWidget):
+            self.projectOpened.connect(w.on_project_opened)
+            self.projectReset.connect(w.on_project_reset)
 
     def showAboutDialog(self):
         QMessageBox.about(
@@ -175,15 +191,48 @@ class KMagHunters(QMainWindow):
             "This is the KMagHunters application \nfor magnetic data viewing, \ndeveloped by KIGAM and GEOLUX.",
         )
 
-    def menu_action_enable(self):
-        self.resetProject_action.setEnabled(True)
-        self.convert_action.setEnabled(True)
-        self.import_SEC_files_action.setEnabled(True)
-        self.config_action.setEnabled(True)
+    def menu_action_enable(self, action=True):
+        self.closeProject_action.setEnabled(action)
+        self.resetProject_action.setEnabled(action)
+        self.convert_action.setEnabled(action)
+        self.import_SEC_files_action.setEnabled(action)
+        self.config_action.setEnabled(action)
 
-        self.FligtPlotWidget.actionEnable()
-        self.LinePlotWidget.actionEnable()
-        self.CalibPlotWidget.actionEnable()
+        self.FligtPlotWidget.actionEnable(action)
+        self.LinePlotWidget.actionEnable(action)
+        self.CalibPlotWidget.actionEnable(action)
+        action = not action
+        self.createProject_action.setEnabled(action)
+        self.openProject_action.setEnabled(action)
+
+    def closeProjectFolder(self):
+        logger.debug("Event : closeProjectFolder")
+        self.menu_action_enable(False)
+
+    def createProjectFolder(self):
+        logger.debug("Event : createProjectFolder")
+        dlg = CreateProjectDialog(parent=self)
+        if not dlg.exec():
+            return
+        selection = dlg.selection
+        logger.debug(f"{selection}")
+        folder_path = selection.get("project_path", "")
+        if not folder_path:
+            return
+
+        config.set_path(os.path.join(folder_path, "project_settings.json"))
+        self.cfg["init"]["project_path"] = folder_path
+        self.settings.write(self.settings.settings)
+        os.makedirs(folder_path, exist_ok=True)
+
+        config.set("direction", folder_path)
+        config.set("project_path", folder_path, save=True)
+
+        make_project_subfolder(".processed")
+
+        self.openProject_action.setEnabled(False)
+        self.createProject_action.setEnabled(False)
+        self.menu_action_enable(True)
 
     def openProjectFolder(self):
         logger.debug("Event : openProjectFolder")
@@ -194,12 +243,14 @@ class KMagHunters(QMainWindow):
         if folder_path:
             logger.debug(f"openProjectFolder {folder_path}")
             self.cfg["init"]["project_path"] = folder_path
+            self.settings.write(self.settings.settings)
             config.set_path(os.path.join(folder_path, "project_settings.json"))
             config.load()
             config.set("project_path", folder_path, save=True)
             make_project_subfolder(".processed")
 
             self.openProject_action.setEnabled(False)
+            self.createProject_action.setEnabled(False)
             self.menu_action_enable()
 
             self.projectOpened.emit(folder_path)

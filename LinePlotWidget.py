@@ -131,10 +131,10 @@ class LinePlotWidget(QWidget):
         self.actionPlotKriging.setEnabled(False)
         self.actionSaveData.setEnabled(False)
 
-    def actionEnable(self):
-        self.actionDataConfiDisp.setEnabled(True)
-        self.actionPlotKriging.setEnabled(True)
-        self.actionSaveData.setEnabled(True)
+    def actionEnable(self, action=True):
+        self.actionDataConfiDisp.setEnabled(action)
+        self.actionPlotKriging.setEnabled(action)
+        self.actionSaveData.setEnabled(action)
 
     def openDataFilterDialog(self):
         DataFilterDialog(self).exec()
