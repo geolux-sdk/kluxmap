@@ -38,9 +38,10 @@ class FlightPlotWidget(QWidget):
         self.settings = settings
         self.db = db
 
-        self._scatters = []
-        self._sel_positions = []
         self._selected_lines = []
+
+        self._is_panning = False
+        self._last_mouse_pos = None
 
         self.initUI()
 
@@ -69,9 +70,9 @@ class FlightPlotWidget(QWidget):
 
         # 메인 레이아웃 설정
         vbox_layout = QVBoxLayout()
-        vbox_layout.addWidget(
-            self.createProjectLabel(), alignment=Qt.AlignmentFlag.AlignLeft
-        )
+        # vbox_layout.addWidget(
+        #     self.createProjectLabel(), alignment=Qt.AlignmentFlag.AlignLeft
+        # )
         vbox_layout.addWidget(
             self.createFileList(), alignment=Qt.AlignmentFlag.AlignLeft
         )
@@ -82,12 +83,15 @@ class FlightPlotWidget(QWidget):
         ctrl_panel = QFrame()
         ctrl_panel.setLineWidth(3)
         ctrl_panel.setLayout(vbox_layout)
+        ctrl_panel.setMaximumWidth(300)
+        # ctrl_panel.setFrameShape(QFrame.Shape.StyledPanel)
 
         canvas_layout = QHBoxLayout()
 
-        canvas_layout.addWidget(
-            self.createCanvasPlot(), alignment=Qt.AlignmentFlag.AlignHCenter
-        )
+        # canvas_layout.addWidget(
+        #     self.createCanvasPlot(), alignment=Qt.AlignmentFlag.AlignHCenter
+        # )
+        canvas_layout.addWidget(self.createCanvasPlot(), 1)
 
         main_layout = QHBoxLayout()
         main_layout.setContentsMargins(1, 1, 1, 1)
@@ -126,8 +130,8 @@ class FlightPlotWidget(QWidget):
         self.lbl_folder_path.setAlignment(
             Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft
         )
-        self.lbl_folder_path.setMinimumWidth(200)
-        self.lbl_folder_path.setMaximumWidth(300)
+        # self.lbl_folder_path.setMinimumWidth(200)
+        # self.lbl_folder_path.setMaximumWidth(300)
 
         # QLabel들을 레이아웃에 배치
         layout = QHBoxLayout()
@@ -161,7 +165,7 @@ class FlightPlotWidget(QWidget):
             QAbstractItemView.SelectionMode.MultiSelection
         )
         self.fileListWidget.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-        self.fileListWidget.setFixedWidth(300)
+        self.fileListWidget.setMaximumWidth(200)
         self.fileListWidget.itemClicked.connect(self.on_item_clicked)
         self.fileListWidget.customContextMenuRequested.connect(
             self.show_file_list_context_menu
@@ -183,66 +187,113 @@ class FlightPlotWidget(QWidget):
         # matplotlib canvas를 PyQt6 위젯으로 변환하여 반환
         self.canvas = FigureCanvas(self.fig)
 
-        # self.canvas.mpl_connect("motion_notify_event", self._on_mouse_move)
-        # self.canvas.mpl_connect("button_press_event", self._on_scatter_select)
-        self.canvas.mpl_connect("button_press_event", self.on_canvas_click)
-        self.canvas.mpl_connect("scroll_event", self._on_wheel_zoom)
+        self.canvas.mpl_connect("scroll_event", self.scroll)
+        self.canvas.mpl_connect("button_press_event", self.on_press)
+        self.canvas.mpl_connect("button_release_event", self.on_release)
+        self.canvas.mpl_connect("motion_notify_event", self.on_motion)
+        self.canvas.mpl_connect("resize_event", self.on_resize)
         return self.canvas
 
-    def _on_wheel_zoom(self, event):  # , ax, canvas, base_scale):
-        base_scale = 1.1
-        # 축 바깥에서 스크롤한 경우 무시
-        if event.inaxes != self.ax or event.xdata is None or event.ydata is None:
+    def on_resize(self, event):
+        # self.updatePlot()
+        self._fit_bounds_to_canvas_equal(margin_ratio=0.05)
+
+    def on_press(self, event):
+        if event.button == 1 and event.inaxes == self.ax:
+            self._is_panning = True
+            self._last_mouse_pos = (event.xdata, event.ydata)
+        self.on_canvas_click(event)
+
+    def on_release(self, event):
+        if event.button == 1:
+            self._is_panning = False
+            self._last_mouse_pos = None
+
+    def on_motion(self, event):
+        if not self._is_panning or event.inaxes != self.ax:
             return
 
-        # 확대/축소 배율 (휠 ↑ 확대, 휠 ↓ 축소)
-        scale = base_scale if event.button == "up" else (1.0 / base_scale)
+        if self._last_mouse_pos is None:
+            return
 
-        # 현재 축 범위
-        x1, x2 = self.ax.get_xlim()
-        y1, y2 = self.ax.get_ylim()
-        width = x2 - x1
-        height = y2 - y1
+        dx = self._last_mouse_pos[0] - event.xdata
+        dy = self._last_mouse_pos[1] - event.ydata
 
-        # 마우스 위치를 현재 범위에서의 비율로 환산 (좌측/하단에서 얼마나 떨어졌는지 비율)
-        relx = (event.xdata - x1) / max(width, 1e-12)
-        rely = (event.ydata - y1) / max(height, 1e-12)
+        xlim = self.ax.get_xlim()
+        ylim = self.ax.get_ylim()
 
-        # 보조키로 축 잠금:
-        #  - Ctrl: X축만 줌
-        #  - Shift: Y축만 줌
-        zoom_x = True
-        zoom_y = True
-        if event.key == "control":
-            zoom_y = False
-        elif event.key == "shift":
-            zoom_x = False
+        self.ax.set_xlim(xlim[0] + dx, xlim[1] + dx)
+        self.ax.set_ylim(ylim[0] + dy, ylim[1] + dy)
 
-        if zoom_x:
-            new_w = width / scale
-            new_x1 = event.xdata - relx * new_w
-            new_x2 = new_x1 + new_w
-            self.ax.set_xlim(new_x1, new_x2)
+        self._last_mouse_pos = (event.xdata, event.ydata)
+        self.canvas.draw_idle()
 
-        if zoom_y:
-            new_h = height / scale
-            new_y1 = event.ydata - rely * new_h
-            new_y2 = new_y1 + new_h
-            self.ax.set_ylim(new_y1, new_y2)
+    def scroll(self, event):
+        if event.inaxes != self.ax:
+            return
 
-        # equal 비율을 쓰는 축이면 유지(스캐터 지도 같은 경우)
-        try:
-            if self.ax.get_aspect() in ("equal", 1.0):
-                self.ax.set_aspect("equal", adjustable="box")
-        except Exception:
-            pass
+        scale_factor = 1.2 if event.button == "up" else 1 / 1.2
+        xlim = self.ax.get_xlim()
+        ylim = self.ax.get_ylim()
 
+        xdata, ydata = event.xdata, event.ydata
+        new_xlim = [
+            xdata - (xdata - xlim[0]) * scale_factor,
+            xdata + (xlim[1] - xdata) * scale_factor,
+        ]
+        new_ylim = [
+            ydata - (ydata - ylim[0]) * scale_factor,
+            ydata + (ylim[1] - ydata) * scale_factor,
+        ]
+
+        self.ax.set_xlim(new_xlim)
+        self.ax.set_ylim(new_ylim)
         self.canvas.draw_idle()
 
     def on_item_clicked(self, item):
         file_name = item.text()
         logger.debug(f"Item clicked: {file_name}")
         self.updatePlot()
+
+    def clac_XYlimit_listAll(self):
+        all_x, all_y = [], []
+        listAll = [
+            self.fileListWidget.item(i).text()
+            for i in range(self.fileListWidget.count())
+        ]
+        for filename in listAll:
+            df = self.db.get_FlightData(filename)
+            if df is None or df.empty:
+                continue
+            xdata, ydata, vals = self.db.get_XYMagData(df)
+            all_x.extend(xdata)
+            all_y.extend(ydata)
+        pad = 100
+        self.minx, self.maxx = int(np.min(all_x) - pad), int(np.max(all_x) + pad)
+        self.miny, self.maxy = int(np.min(all_y) - pad), int(np.max(all_y) + pad)
+        self.data_width = self.maxx - self.minx
+        self.data_height = self.maxy - self.miny
+        data_ratio = self.data_width / self.data_height
+
+        w, h = self.canvas.get_width_height()
+        if h <= 0:
+            h = 1
+        canvas_ratio = w / h
+
+        if data_ratio < canvas_ratio:
+            width = canvas_ratio * self.data_height
+            minx = (self.minx + self.maxx) / 2 - width / 2
+            maxx = (self.minx + self.maxx) / 2 + width / 2
+            miny = self.miny
+            maxy = self.maxy
+        else:
+            height = self.data_width / canvas_ratio
+            miny = (self.miny + self.maxy) / 2 - height / 2
+            maxy = (self.miny + self.maxy) / 2 + height / 2
+            minx = self.minx
+            maxx = self.maxx
+
+        return minx, maxx, miny, maxy
 
     def updatePlot(self):
         logger.debug("updatePlot")
@@ -286,17 +337,18 @@ class FlightPlotWidget(QWidget):
                 self.canvas.draw()
                 return
 
-            # --- 3) 전체 경계 계산 ---
-            minx, maxx = np.min(all_x), np.max(all_x)
-            miny, maxy = np.min(all_y), np.max(all_y)
-            pad = 100
+            # # --- 3) 전체 경계 계산 ---
+            # minx, maxx = np.min(all_x), np.max(all_x)
+            # miny, maxy = np.min(all_y), np.max(all_y)
+            # pad = 100
             vmin = np.min(all_vals)
             vmax = np.max(all_vals)
             self.values_colorbar = (vmin, vmax)
 
             self.ax.clear()
-            self.ax.set_xlim(minx - pad, maxx + pad)
-            self.ax.set_ylim(miny - pad, maxy + pad)
+            minx, maxx, miny, maxy = self.clac_XYlimit_listAll()
+            self.ax.set_xlim(minx, maxx)
+            self.ax.set_ylim(miny, maxy)
 
             # # --- 5) 컬러맵 설정 ---
             show_cb = cfg.get("show_colorbar", False)
@@ -379,8 +431,52 @@ class FlightPlotWidget(QWidget):
         except Exception as err:
             logger.error(f"Update Plot : {repr(err)}")
 
+        # self._fit_bounds_to_canvas_equal(margin_ratio=0.05)
         self.fig.tight_layout()
         self.canvas.draw()
+
+    def _fit_bounds_to_canvas_equal(self, margin_ratio=0.05):
+        logger.debug("_fit_bounds_to_canvas_equal")
+        """aspect=equal(1:1) 유지하면서 캔버스 비율에 맞게 x/y 범위를 확장해 꽉 채우기."""
+        ax = self.ax
+        # 현재 데이터 경계
+        x1, x2 = ax.get_xlim()
+        y1, y2 = ax.get_ylim()
+
+        # 데이터 범위 계산
+        rx = max(x2 - x1, 1e-12)
+        ry = max(y2 - y1, 1e-12)
+
+        # # 5% 여백 적용 (이미 여백을 넣어 설정했다면 생략 가능)
+        cx = (x1 + x2) * 0.5
+        cy = (y1 + y2) * 0.5
+
+        # 캔버스 픽셀 비율
+        w, h = self.canvas.get_width_height()
+        if h <= 0:
+            h = 1
+        canvas_ratio = w / h  # (가로/세로)
+
+        # aspect=equal(1:1)을 유지하려면 데이터의 (rx/ry)도 canvas_ratio로 맞춰야 함
+        data_ratio = rx / ry
+        if data_ratio < canvas_ratio:
+            # 가로가 부족 → rx를 늘림
+            rx = canvas_ratio * ry
+        else:
+            # 세로가 부족 → ry를 늘림
+            ry = rx / canvas_ratio
+
+        # 새 경계 설정(센터 고정)
+        new_x1, new_x2 = cx - rx * 0.5, cx + rx * 0.5
+        new_y1, new_y2 = cy - ry * 0.5, cy + ry * 0.5
+
+        ax.set_xlim(new_x1, new_x2)
+        ax.set_ylim(new_y1, new_y2)
+        logger.debug(
+            f"new_x1: {new_x1}, new_x2: {new_x2}, new_y1: {new_y1}, new_y2: {new_y2}"
+        )
+        self.ax.set_aspect("equal")
+        self.canvas.draw_idle()
 
     def updateFileList(self, files):
         """선택된 폴더의 파일 목록을 리스트 위젯에 업데이트"""
@@ -396,7 +492,6 @@ class FlightPlotWidget(QWidget):
         self.db.clear_FlightData()
         for file_name in files:
             self.db.load_FlightData(file_name)
-
         self.updatePlot()
 
     def modify(self, points):
@@ -452,66 +547,6 @@ class FlightPlotWidget(QWidget):
                 f"An error occurred while opening or processing the file: {repr(e)}",
             )
 
-    # def _on_scatter_select(self, event):
-    #     # 오른쪽 클릭: 즉시 취소
-    #     if event.button == 3:
-    #         # 현재 선택 및 임시 선 제거
-    #         self._sel_positions.clear()
-    #         if hasattr(self, "_temp_line") and self._temp_line:
-    #             self._temp_line.remove()
-    #             self._temp_line = None
-    #         self.updatePlot()
-    #         return
-
-    #     if event.inaxes is not self.ax or self.df.empty:
-    #         return
-
-    #     # 왼쪽 클릭 싱글: 시작점 마킹
-    #     if event.button == 1 and not self._sel_positions:
-    #         x0, y0 = event.xdata, event.ydata
-    #         dx = self.df["X"].values - x0
-    #         dy = self.df["Y"].values - y0
-    #         pos = int((dx * dx + dy * dy).argmin())
-    #         self._sel_positions = [pos]
-    #         self.ax.scatter(
-    #             self.df["X"].iloc[pos],
-    #             self.df["Y"].iloc[pos],
-    #             marker="o",
-    #             s=5,
-    #             c="yellow",
-    #             zorder=10,
-    #         )
-    #         self.ax.figure.canvas.draw_idle()
-    #         return
-    #     if event.button == 1 and self._sel_positions:
-    #         x0, y0 = event.xdata, event.ydata
-    #         dx = self.df["X"].values - x0
-    #         dy = self.df["Y"].values - y0
-    #         pos = int((dx * dx + dy * dy).argmin())
-
-    #         self._sel_positions.append(pos)
-    #         if self._sel_positions[0] != self._sel_positions[1]:
-    #             self._selected_lines.append(sorted(self._sel_positions))
-    #         self._sel_positions.clear()
-    #         self.updatePlot()
-    #         return
-
-    # def _on_mouse_move(self, event):
-    #     """첫 점 선택 후 마우스 이동 시 임시 라인(rubber-band) 그리기"""
-    #     if not self._sel_positions or event.inaxes is not self.ax:
-    #         return
-    #     x0 = self.df["X"].iloc[self._sel_positions[0]]
-    #     y0 = self.df["Y"].iloc[self._sel_positions[0]]
-    #     x1, y1 = event.xdata, event.ydata
-    #     # 이전 임시 라인 제거
-    #     if hasattr(self, "_temp_line") and self._temp_line:
-    #         self._temp_line.remove()
-    #     # 새로운 임시 라인 그리기
-    #     self._temp_line = self.ax.plot(
-    #         [x0, x1], [y0, y1], "--", color="blue", zorder=4
-    #     )[0]
-    #     self.ax.figure.canvas.draw_idle()
-
     def openFIleBrowser(self):
         logger.debug("openFIleBrowser")
         proj_path = config.get("project_path", "")
@@ -551,7 +586,7 @@ class FlightPlotWidget(QWidget):
 
         config.set("filters", config.get("filters", filters_defaults), save=True)
 
-        self.lbl_folder_path.setText(config.get("project_path", ""))
+        # self.lbl_folder_path.setText(config.get("project_path", ""))
         flightData_path = os.path.join(
             config.get("project_path", ""), "Measure Flight Folder"
         )

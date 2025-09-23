@@ -208,6 +208,7 @@ class KMagHunters(QMainWindow):
     def closeProjectFolder(self):
         logger.debug("Event : closeProjectFolder")
         self.menu_action_enable(False)
+        self.projectReset.emit()
 
     def createProjectFolder(self):
         logger.debug("Event : createProjectFolder")

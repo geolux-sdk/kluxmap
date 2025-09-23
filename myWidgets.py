@@ -969,7 +969,7 @@ class CreateProjectDialog(QDialog):
         folder_group.setLayout(projfolder_layout)
 
         direction_group = QGroupBox("Flight Direction:")
-        self.radio_nw = QRadioButton("NW")
+        self.radio_nw = QRadioButton("NS")
         radio_ew = QRadioButton("EW")
         self.radio_nw.setChecked(True)
         dir_button_group = QButtonGroup(direction_group)
