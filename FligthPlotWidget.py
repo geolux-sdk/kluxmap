@@ -632,6 +632,11 @@ class FlightPlotWidget(QWidget):
             config.set("Flight_File_List", list_files, save=True)
             self.updatePlot()
 
+    def delete_all_items(self):
+        self.fileListWidget.clear()
+        self.db.clear_FlightData()
+        self.updatePlot()
+
     def delete_FlightFolderFile(self, name: str):
         logger.debug(f"delete_FlightFolderFile {name}")
         proj_path = config.get("project_path", "")
@@ -679,4 +684,4 @@ class FlightPlotWidget(QWidget):
 
     @Slot()
     def on_project_reset(self):
-        self.initialize()
+        self.delete_all_items()

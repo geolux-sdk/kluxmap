@@ -839,10 +839,21 @@ class LinePlotWidget(QWidget):
         self.updateFileList(ScanLineFiles)
         QApplication.restoreOverrideCursor()
 
+    def delete_all_items(self):
+        self.fileListWidget.clear()
+        self.scanline_df.clear()
+        self.scanline_filepaths.clear()
+        self.selected_df = pd.DataFrame()
+        self.populate_table(self.selected_df)
+        self.scatter_fig.clear()
+        self.ax.clear()
+        self.canvas.draw()
+        self.update_scatterplot()
+
     @Slot(str)
     def on_project_opened(self, project_path: str):
         pass
 
     @Slot()
     def on_project_reset(self):
-        pass
+        self.delete_all_items()

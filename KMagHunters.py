@@ -234,6 +234,7 @@ class KMagHunters(QMainWindow):
         self.openProject_action.setEnabled(False)
         self.createProject_action.setEnabled(False)
         self.menu_action_enable(True)
+        self.projectOpened.emit(folder_path)
 
     def openProjectFolder(self):
         logger.debug("Event : openProjectFolder")
