@@ -692,22 +692,22 @@ class LinePlotWidget(QWidget):
                     f"{key}: applied Calibration (dir={direction}, offset={offset:.2f})"
                 )
 
-                if "Sensor_X" in df.columns:
-                    if direction == "S_N":
-                        logger.debug(f"Make Cali_Sensor Data {self.calibration_data}")
-                        df["Cal_Sensor_X"] = (
-                            df["Sensor_X"] + self.calibration_data["offset_Sensor_X"]
-                        )
-                        df["Cal_Sensor_Y"] = (
-                            df["Sensor_Y"] + self.calibration_data["offset_Sensor_Y"]
-                        )
-                        df["Cal_Sensor_Z"] = (
-                            df["Sensor_Z"] + self.calibration_data["offset_Sensor_Z"]
-                        )
-                    else:
-                        df["Cal_Sensor_X"] = df["Sensor_X"]
-                        df["Cal_Sensor_Y"] = df["Sensor_Y"]
-                        df["Cal_Sensor_Z"] = df["Sensor_Z"]
+                # if "Sensor_X" in df.columns:
+                #     if direction == "S_N":
+                #         logger.debug(f"Make Cali_Sensor Data {self.calibration_data}")
+                #         df["Cal_Sensor_X"] = (
+                #             df["Sensor_X"] + self.calibration_data["offset_Sensor_X"]
+                #         )
+                #         df["Cal_Sensor_Y"] = (
+                #             df["Sensor_Y"] + self.calibration_data["offset_Sensor_Y"]
+                #         )
+                #         df["Cal_Sensor_Z"] = (
+                #             df["Sensor_Z"] + self.calibration_data["offset_Sensor_Z"]
+                #         )
+                #     else:
+                #         df["Cal_Sensor_X"] = df["Sensor_X"]
+                #         df["Cal_Sensor_Y"] = df["Sensor_Y"]
+                #         df["Cal_Sensor_Z"] = df["Sensor_Z"]
 
         # 필터링이 적용된 후, 이전에 선택된 항목의 뷰를 새로고침합니다.
         self.on_item_clicked(current_item)
