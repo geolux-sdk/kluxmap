@@ -1,6 +1,7 @@
 import json
-import os
 import sys
+from pathlib import Path
+from typing import Any, Dict, Optional
 
 from jsonschema import ValidationError, validate
 from loguru import logger
@@ -11,7 +12,7 @@ class myConfigs:
         self.config = {}
 
     def set_path(self, file_path):
-        self.file_path = file_path
+        self.file_path = Path(file_path)
 
     def get(self, key, default=None):
         return self.config.get(key, default)
@@ -37,7 +38,7 @@ class myConfigs:
 
     def save(self):
         try:
-            with open(self.file_path, "w", encoding="utf-8") as file:
+            with self.file_path.open("w", encoding="utf-8") as file:
                 json.dump(self.config, file, indent=4)
         except IOError as err:
             logger.error(f"IOError during write: {err}")
@@ -45,7 +46,7 @@ class myConfigs:
 
     def load(self):
         try:
-            with open(self.file_path, "r", encoding="utf-8") as file:
+            with self.file_path.open("r", encoding="utf-8") as file:
                 self.config = json.load(file)
         except FileNotFoundError as err:
             logger.warning(f"Config File not found: {err}")
@@ -66,7 +67,11 @@ class mySettings:
             "level": "DEBUG",
             "console": True,
         },
-        "init": {"splash": True, "project_path": ""},
+        "init": {
+            "splash": True,
+            "size": {"width": 800, "height": 600},
+            "project_path": "",
+        },
     }
 
     schema = {
@@ -82,25 +87,28 @@ class mySettings:
     }
 
     def __init__(
-        self, defaults: dict = None, file_name="settings.json", folder_name="./"
+        self,
+        defaults: Optional[Dict[str, Any]] = None,
+        file_name: str = "settings.json",
+        folder_name: str = "./",
     ) -> None:
         self.defaults = defaults if defaults is not None else self.defaults
-        self.file_path = os.path.join(folder_name, file_name)
+        self.file_path = Path(folder_name) / file_name
 
         self.settings = self.read()
         self.logger = self._logger_init()
         self.validate(self.schema)
 
     def _logger_init(self):
-        logger_folder = self.settings.get("logger", {}).get("folder", "./log")
+        logger_folder = Path(self.settings.get("logger", {}).get("folder", "./log"))
         logger_filename = self.settings.get("logger", {}).get("filename", "app.log")
         logger_level = self.settings.get("logger", {}).get("level", "DEBUG")
         logger_consol = self.settings.get("logger", {}).get("console", False)
-        logger_path = os.path.join(logger_folder, logger_filename)
+        logger_path = logger_folder / logger_filename
 
         logger.remove()  # 화면에 안보이기 위해서..
 
-        os.makedirs(logger_folder, exist_ok=True)
+        logger_folder.mkdir(parents=True, exist_ok=True)
         logger.add(logger_path, level=logger_level, rotation="10 MB")
 
         if logger_consol:
@@ -119,7 +127,7 @@ class mySettings:
 
     def read(self):
         try:
-            with open(self.file_path, "r", encoding="utf-8") as file:
+            with self.file_path.open("r", encoding="utf-8") as file:
                 data = json.load(file)
             return data
         except FileNotFoundError as err:
@@ -133,7 +141,7 @@ class mySettings:
 
     def write(self, data: dict) -> None:
         try:
-            with open(self.file_path, "w", encoding="utf-8") as file:
+            with self.file_path.open("w", encoding="utf-8") as file:
                 json.dump(data, file, indent=4)
         except IOError as err:
             self.logger.error(f"IOError during write: {err}")
@@ -145,6 +153,14 @@ class mySettings:
         except ValidationError as err:
             self.logger.error(f"Validation error: {err}")
             raise
+
+    def set(self, key: str, value: Any, save=False) -> None:
+        self.settings[key] = value
+        if save:
+            self.write(self.settings)
+
+    def get(self, key: str, default: Any) -> Any:
+        return self.settings.get(key, default)
 
 
 config = myConfigs()
