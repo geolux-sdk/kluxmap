@@ -31,7 +31,7 @@ class myConfigs:
             d[key[-1]] = value
 
         if save:
-            self.write(self.config)
+            self.save()
 
     @logger.catch()  # 함수 안에서 발생하는 모든 예외(Exception)를 자동으로 잡아서 로깅
     def get(self, key: Union[str, list[str], tuple[str]], default: Any = None) -> Any:
