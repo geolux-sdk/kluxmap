@@ -15,13 +15,36 @@ class myConfigs:
     def set_path(self, file_path: str | Path) -> None:
         self.__file_path = Path(file_path)
 
-    def get(self, key: str, default: Any = None) -> Any:
-        return self.config.get(key, default)
+    @logger.catch()  # 함수 안에서 발생하는 모든 예외(Exception)를 자동으로 잡아서 로깅
+    def set(
+        self, key: Union[str, list[str], tuple[str]], value: Any, save: bool = False
+    ) -> None:
+        if isinstance(key, str):
+            self.config[key] = value
 
-    def set(self, key: str, value: Any, save: bool = False) -> None:
-        self.config[key] = value
+        if isinstance(key, (list, tuple)):
+            d = self.config
+            for k in key[:-1]:
+                if k not in d or not isinstance(d[k], dict):
+                    d[k] = {}
+                d = d[k]
+            d[key[-1]] = value
+
         if save:
-            self.save()
+            self.write(self.config)
+
+    @logger.catch()  # 함수 안에서 발생하는 모든 예외(Exception)를 자동으로 잡아서 로깅
+    def get(self, key: Union[str, list[str], tuple[str]], default: Any = None) -> Any:
+        if isinstance(key, str):
+            return self.config.get(key, default)
+
+        if isinstance(key, (list, tuple)):
+            d = self.config
+            for k in key:
+                if not isinstance(d, dict) or k not in d:
+                    return default
+                d = d[k]
+            return d
 
     @logger.catch()  # 함수 안에서 발생하는 모든 예외(Exception)를 자동으로 잡아서 로깅
     def get_subvalue(self, key: str, subkey: str, default: Any = None) -> Any:
