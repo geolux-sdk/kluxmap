@@ -2,6 +2,7 @@ import json
 import sys
 from pathlib import Path
 from typing import Any, Dict, Optional
+from xmlrpc.client import Boolean
 
 from jsonschema import ValidationError, validate
 from loguru import logger
@@ -11,42 +12,44 @@ class myConfigs:
     def __init__(self) -> None:
         self.config = {}
 
-    def set_path(self, file_path):
-        self.file_path = Path(file_path)
+    def set_path(self, file_path: str) -> None:
+        self.__file_path = Path(file_path)
 
-    def get(self, key, default=None):
+    def get(self, key: str, default=Optional[Any]) -> Any:
         return self.config.get(key, default)
 
-    def set(self, key, value, save=False):
+    def set(self, key: str, value=Any, save=False) -> None:
         self.config[key] = value
         if save:
             self.save()
 
     @logger.catch()  # 함수 안에서 발생하는 모든 예외(Exception)를 자동으로 잡아서 로깅
-    def get_subvalue(self, key, subkey, default=None):
+    def get_subvalue(self, key: str, subkey: str, default=Optional[Any]) -> Any:
         if key in self.config:
             return self.config[key].get(subkey, default)
         return default
 
-    @logger.catch()
-    def set_subvalue(self, key, subkey, value, save=False):
+    @logger.catch()  # 함수 안에서 발생하는 모든 예외(Exception)를 자동으로 잡아서 로깅
+    def set_subvalue(
+        self, key: str, subkey: str, value=Any, save: Boolean = False
+    ) -> None:
         if key not in self.config:
             self.config[key] = {}
         self.config[key][subkey] = value
         if save:
             self.save()
 
-    def save(self):
+    def save(self) -> None:
         try:
-            with self.file_path.open("w", encoding="utf-8") as file:
+            with self.__file_path.open("w", encoding="utf-8") as file:
                 json.dump(self.config, file, indent=4)
         except IOError as err:
             logger.error(f"IOError during write: {err}")
             raise
 
-    def load(self):
+    def load(self) -> None:
         try:
-            with self.file_path.open("r", encoding="utf-8") as file:
+            with self.__file_path.open("r", encoding="utf-8") as file:
                 self.config = json.load(file)
         except FileNotFoundError as err:
             logger.warning(f"Config File not found: {err}")
@@ -93,13 +96,13 @@ class mySettings:
         folder_name: str = "./",
     ) -> None:
         self.defaults = defaults if defaults is not None else self.defaults
-        self.file_path = Path(folder_name) / file_name
+        self.__file_path = Path(folder_name) / file_name
 
         self.settings = self.read()
         self.logger = self._logger_init()
         self.validate(self.schema)
 
-    def _logger_init(self):
+    def _logger_init(self) -> None:
         logger_folder = Path(self.settings.get("logger", {}).get("folder", "./log"))
         logger_filename = self.settings.get("logger", {}).get("filename", "app.log")
         logger_level = self.settings.get("logger", {}).get("level", "DEBUG")
@@ -119,15 +122,15 @@ class mySettings:
         logger.info("Logging started")
         return logger
 
-    def _logger(self, message):
+    def _logger(self, message: str) -> None:
         if hasattr(self, "logger"):
             self.logger.debug(message)
         else:
             print(">> mySettings Logger:", message)
 
-    def read(self):
+    def read(self) -> Dict:
         try:
-            with self.file_path.open("r", encoding="utf-8") as file:
+            with self.__file_path.open("r", encoding="utf-8") as file:
                 data = json.load(file)
             return data
         except FileNotFoundError as err:
@@ -139,15 +142,15 @@ class mySettings:
             self._logger(f"JSON decode error: {err}")
             raise
 
-    def write(self, data: dict) -> None:
+    def write(self, data: Dict) -> None:
         try:
-            with self.file_path.open("w", encoding="utf-8") as file:
+            with self.__file_path.open("w", encoding="utf-8") as file:
                 json.dump(data, file, indent=4)
         except IOError as err:
             self.logger.error(f"IOError during write: {err}")
             raise
 
-    def validate(self, schema):
+    def validate(self, schema: Dict) -> None:
         try:
             validate(instance=self.settings, schema=schema)
         except ValidationError as err:
