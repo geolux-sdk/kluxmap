@@ -1,8 +1,7 @@
 import json
 import sys
 from pathlib import Path
-from typing import Any, Dict, Optional
-from xmlrpc.client import Boolean
+from typing import Any, Optional
 
 from jsonschema import ValidationError, validate
 from loguru import logger
@@ -10,36 +9,40 @@ from loguru import logger
 
 class myConfigs:
     def __init__(self) -> None:
-        self.config = {}
+        self.__file_path: Optional[Path] = None
+        self.config: dict[str, Any] = {}
 
-    def set_path(self, file_path: str) -> None:
+    def set_path(self, file_path: str | Path) -> None:
         self.__file_path = Path(file_path)
 
-    def get(self, key: str, default=Optional[Any]) -> Any:
+    def get(self, key: str, default: Any = None) -> Any:
         return self.config.get(key, default)
 
-    def set(self, key: str, value=Any, save=False) -> None:
+    def set(self, key: str, value: Any, save: bool = False) -> None:
         self.config[key] = value
         if save:
             self.save()
 
     @logger.catch()  # 함수 안에서 발생하는 모든 예외(Exception)를 자동으로 잡아서 로깅
-    def get_subvalue(self, key: str, subkey: str, default=Optional[Any]) -> Any:
+    def get_subvalue(self, key: str, subkey: str, default: Any = None) -> Any:
         if key in self.config:
             return self.config[key].get(subkey, default)
         return default
 
     @logger.catch()  # 함수 안에서 발생하는 모든 예외(Exception)를 자동으로 잡아서 로깅
     def set_subvalue(
-        self, key: str, subkey: str, value=Any, save: Boolean = False
+        self, key: str, subkey: str, value: Any, save: bool = False
     ) -> None:
-        if key not in self.config:
+        if key not in self.config or not isinstance(self.config[key], dict):
             self.config[key] = {}
         self.config[key][subkey] = value
         if save:
             self.save()
 
     def save(self) -> None:
+        if self.__file_path is None:
+            raise ValueError("Config file path is not set. Call set_path() first.")
+
         try:
             with self.__file_path.open("w", encoding="utf-8") as file:
                 json.dump(self.config, file, indent=4)
@@ -48,6 +51,9 @@ class myConfigs:
             raise
 
     def load(self) -> None:
+        if self.__file_path is None:
+            raise ValueError("Config file path is not set. Call set_path() first.")
+
         try:
             with self.__file_path.open("r", encoding="utf-8") as file:
                 self.config = json.load(file)
@@ -60,6 +66,10 @@ class myConfigs:
 
     def clear(self):
         self.config = {}
+
+    @property
+    def file_path(self) -> Optional[Path]:
+        return self.__file_path
 
 
 class mySettings:
@@ -91,16 +101,15 @@ class mySettings:
 
     def __init__(
         self,
-        defaults: Optional[Dict[str, Any]] = None,
+        defaults: Optional[dict[str, Any]] = None,
         file_name: str = "settings.json",
         folder_name: str = "./",
     ) -> None:
         self.defaults = defaults if defaults is not None else self.defaults
         self.__file_path = Path(folder_name) / file_name
 
-        self.settings = self.read()
-        self.logger = self._logger_init()
-        self.validate(self.schema)
+        self.settings = self._read_or_initialize(self.schema)
+        self._logger_init()
 
     def _logger_init(self) -> None:
         logger_folder = Path(self.settings.get("logger", {}).get("folder", "./log"))
@@ -119,46 +128,39 @@ class mySettings:
         else:
             logger.debug("Console logger disabled")
 
-        logger.info("Logging started")
-        return logger
+        logger.info("====================== Logging started ======================")
 
-    def _logger(self, message: str) -> None:
-        if hasattr(self, "logger"):
-            self.logger.debug(message)
-        else:
-            print(">> mySettings Logger:", message)
-
-    def read(self) -> Dict:
+    def _read_or_initialize(self, schema: dict[str, Any]) -> dict[str, Any]:
         try:
             with self.__file_path.open("r", encoding="utf-8") as file:
                 data = json.load(file)
+            validate(instance=data, schema=schema)
             return data
+        except ValidationError as err:
+            logger.error(f"{self.__file_path} File Validation Error: {err}")
+            raise
         except FileNotFoundError as err:
-            self._logger(f"File not found, using defaults: {err}")
+            logger.warning(f"{self.__file_path} File not found, using defaults: {err}")
             self.write(self.defaults)
-            self._logger(">> ------------ USING DEFAULTS -------------")
-            return self.defaults
+            logger.info(">> ------------ USING DEFAULTS -------------")
+            return dict(self.defaults)
         except json.JSONDecodeError as err:
-            self._logger(f"JSON decode error: {err}")
+            logger.error(f"{self.__file_path} JSON decode error: {err}")
             raise
 
-    def write(self, data: Dict) -> None:
+    def write(self, data: dict[str, Any]) -> None:
         try:
             with self.__file_path.open("w", encoding="utf-8") as file:
                 json.dump(data, file, indent=4)
-        except IOError as err:
-            self.logger.error(f"IOError during write: {err}")
-            raise
-
-    def validate(self, schema: Dict) -> None:
-        try:
-            validate(instance=self.settings, schema=schema)
-        except ValidationError as err:
-            self.logger.error(f"Validation error: {err}")
+        except OSError as err:
+            if hasattr(self, "logger"):
+                self.logger.error(f"IOError during write: {err}")
+            else:
+                print(f"IOError during write: {err}")
             raise
 
     @logger.catch()  # 함수 안에서 발생하는 모든 예외(Exception)를 자동으로 잡아서 로깅
-    def set(self, key: str, value: Any, save=False) -> None:
+    def set(self, key: str, value: Any, save: bool = False) -> None:
         self.settings[key] = value
         if save:
             self.write(self.settings)
@@ -166,6 +168,10 @@ class mySettings:
     @logger.catch()  # 함수 안에서 발생하는 모든 예외(Exception)를 자동으로 잡아서 로깅
     def get(self, key: str, default: Any) -> Any:
         return self.settings.get(key, default)
+
+    @property
+    def file_path(self) -> Optional[Path]:
+        return self.__file_path
 
 
 config = myConfigs()
