@@ -22,7 +22,7 @@ class myConfigs:
         if save:
             self.save()
 
-    @logger.catch()
+    @logger.catch()  # 함수 안에서 발생하는 모든 예외(Exception)를 자동으로 잡아서 로깅
     def get_subvalue(self, key, subkey, default=None):
         if key in self.config:
             return self.config[key].get(subkey, default)
@@ -154,11 +154,13 @@ class mySettings:
             self.logger.error(f"Validation error: {err}")
             raise
 
+    @logger.catch()  # 함수 안에서 발생하는 모든 예외(Exception)를 자동으로 잡아서 로깅
     def set(self, key: str, value: Any, save=False) -> None:
         self.settings[key] = value
         if save:
             self.write(self.settings)
 
+    @logger.catch()  # 함수 안에서 발생하는 모든 예외(Exception)를 자동으로 잡아서 로깅
     def get(self, key: str, default: Any) -> Any:
         return self.settings.get(key, default)
 
