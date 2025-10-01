@@ -1,6 +1,7 @@
 import os
 import shutil
 import sys
+from pathlib import Path
 
 os.environ.setdefault("QT_API", "pyside6")  # 선택사항
 
@@ -51,7 +52,6 @@ class KMagHunters(QMainWindow):
         self.settings = mySettings()
 
         logger.info("Progrma Start")
-        self.cfg = self.settings.settings
         self.db = DataManager(self.settings)
         self.initUI()
         self.resize(1400, 900)
@@ -221,10 +221,9 @@ class KMagHunters(QMainWindow):
         if not folder_path:
             return
 
-        config.set_path(os.path.join(folder_path, "project_settings.json"))
-        self.cfg["init"]["project_path"] = folder_path
-        self.settings.write(self.settings.settings)
-        os.makedirs(folder_path, exist_ok=True)
+        config.set_path(str(Path(folder_path) / "project_settings.json"))
+        self.settings.set(["init", "project_path"], folder_path, save=True)
+        Path(folder_path).mkdir(exist_ok=True)
 
         config.set("direction", folder_path)
         config.set("project_path", folder_path, save=True)
@@ -238,14 +237,15 @@ class KMagHunters(QMainWindow):
 
     def openProjectFolder(self):
         logger.debug("Event : openProjectFolder")
-        default = self.cfg["init"].get("project_path", "")
+        default = self.settings.get(["init", "project_path"], "")
         folder_path = QFileDialog.getExistingDirectory(
             self, "Select Folder", os.path.dirname(default)
         )
         if folder_path:
             logger.debug(f"openProjectFolder {folder_path}")
-            self.cfg["init"]["project_path"] = folder_path
-            self.settings.write(self.settings.settings)
+
+            self.settings.set(["init", "project_path"], folder_path, save=True)
+
             config.set_path(os.path.join(folder_path, "project_settings.json"))
             config.load()
             config.set("project_path", folder_path, save=True)

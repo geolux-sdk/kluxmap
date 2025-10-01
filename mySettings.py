@@ -1,7 +1,7 @@
 import json
 import sys
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Optional, Union
 
 from jsonschema import ValidationError, validate
 from loguru import logger
@@ -160,14 +160,34 @@ class mySettings:
             raise
 
     @logger.catch()  # 함수 안에서 발생하는 모든 예외(Exception)를 자동으로 잡아서 로깅
-    def set(self, key: str, value: Any, save: bool = False) -> None:
-        self.settings[key] = value
+    def set(
+        self, key: Union[str, list[str], tuple[str]], value: Any, save: bool = False
+    ) -> None:
+        if isinstance(key, str):
+            self.settings[key] = value
+
+        if isinstance(key, (list, tuple)):
+            d = self.settings
+            for k in key[:-1]:
+                if k not in d or not isinstance(d[k], dict):
+                    d[k] = {}
+                d = d[k]
+            d[key[-1]] = value
+
         if save:
             self.write(self.settings)
 
     @logger.catch()  # 함수 안에서 발생하는 모든 예외(Exception)를 자동으로 잡아서 로깅
-    def get(self, key: str, default: Any) -> Any:
-        return self.settings.get(key, default)
+    def get(self, key: Union[str, list[str], tuple[str]], default: Any = None) -> Any:
+        if isinstance(key, str):
+            return self.settings.get(key, default)
+        if isinstance(key, (list, tuple)):
+            d = self.settings
+            for k in key:
+                if not isinstance(d, dict) or k not in d:
+                    return default
+                d = d[k]
+            return d
 
     @property
     def file_path(self) -> Optional[Path]:

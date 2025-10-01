@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 
 import pandas as pd
 from loguru import logger
@@ -70,7 +71,7 @@ def load_SEC_file(file_path: str, out_folder: str = None) -> str | None:
         return None
 
 
-def make_project_subfolder(subfolder_name: str) -> str | None:
+def make_project_subfolder(subfolder_name: str) -> Path | None:
     """
     프로젝트 경로 내 지정된 하위 폴더를 확인합니다.
     폴더가 없으면 생성하지 않고 에러 로그를 남기고 None을 반환합니다.
@@ -90,10 +91,10 @@ def make_project_subfolder(subfolder_name: str) -> str | None:
         logger.error("Project path is not set in config.")
         return None
 
-    subfolder_path = os.path.join(project_path, subfolder_name)
+    subfolder_path = Path(project_path) / subfolder_name
 
     try:
-        os.makedirs(subfolder_path, exist_ok=True)
+        subfolder_path.mkdir(exist_ok=True)
         logger.debug(f"Subfolder ensured: {subfolder_path}")
         return subfolder_path
     except Exception as e:

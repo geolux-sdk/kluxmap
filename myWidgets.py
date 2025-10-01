@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -997,7 +998,7 @@ class CreateProjectDialog(QDialog):
         logger.debug("CreateProjectDialog accept called")
         if not hasattr(self, "fullpath"):
             return
-        self.selection = {"project_path": self.fullpath}
+        self.selection = {"project_path": str(self.fullpath)}
         if self.radio_nw.isChecked():
             self.selection["direction"] = "NW"
         else:
@@ -1007,10 +1008,11 @@ class CreateProjectDialog(QDialog):
 
     def open_folder(self):
         folder_path = browse_directory(self)
+        proj_folder_path = Path(folder_path)
         if folder_path:
-            self.project_path.setText(folder_path)
-            self.fullpath = os.path.join(folder_path, self.project_name.text().strip())
-            self.project_fullpath.setText(self.fullpath)
+            self.project_path.setText(str(proj_folder_path))
+            self.fullpath = proj_folder_path / self.project_name.text().strip()
+            self.project_fullpath.setText(str(self.fullpath))
 
 
 def browse_files(
