@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -483,15 +484,17 @@ class FlightPlotWidget(QWidget):
         self.fileListWidget.clear()
 
         for file_name in files:
-            basename = os.path.basename(file_name)
-            item = QListWidgetItem(basename)
+            item = QListWidgetItem(file_name)
             self.fileListWidget.addItem(item)
             item.setSelected(True)
             self.fileListWidget.setFocus()
 
+        proj_path = Path(config.get("project_path", ""))
         self.db.clear_FlightData()
+
         for file_name in files:
-            self.db.load_FlightData(file_name)
+            file_path = proj_path / "Measure Flight Folder" / (file_name + ".csv")
+            self.db.load_FlightData(file_path)
         self.updatePlot()
 
     def modify(self, points):
@@ -549,15 +552,15 @@ class FlightPlotWidget(QWidget):
 
     def openFIleBrowser(self):
         logger.debug("openFIleBrowser")
-        proj_path = config.get("project_path", "")
+        proj_path = Path(config.get("project_path", ""))
         if not proj_path:
             QMessageBox.warning(self, "ERROR", "Open a project folder first.")
             return
-        path = os.path.join(proj_path, "Measure Flight Folder")
+        open_path = proj_path / "Measure Flight Folder"
         files, _ = QFileDialog.getOpenFileNames(
             parent=self,
             caption="Select Mag data files",
-            dir=path,
+            dir=str(open_path),
             filter="Flight data (*.csv);;All files (*)",
         )
         logger.debug(f"Selected files: {files}")
@@ -565,10 +568,14 @@ class FlightPlotWidget(QWidget):
             return
 
         list_files = config.get("Flight_File_List", [])
-        list_files.extend(files)
+        for file in files:
+            p = Path(file)
+            name_wo_ext = p.stem
+            if name_wo_ext not in list_files:
+                list_files.append(name_wo_ext)
+
         list_files = list(set(list_files))
         config.set("Flight_File_List", list_files, save=True)
-
         self.updateFileList(list_files)
 
     def initialize(self):
@@ -586,7 +593,6 @@ class FlightPlotWidget(QWidget):
 
         config.set("filters", config.get("filters", filters_defaults), save=True)
 
-        # self.lbl_folder_path.setText(config.get("project_path", ""))
         flightData_path = os.path.join(
             config.get("project_path", ""), "Measure Flight Folder"
         )
@@ -614,7 +620,7 @@ class FlightPlotWidget(QWidget):
         reply = QMessageBox.question(
             self,
             "Delete Item",
-            f"Are you sure you want to delete '{name}' and its associated file?",
+            f"Are you sure you want to delete '{name}'?",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No,
         )
@@ -622,43 +628,17 @@ class FlightPlotWidget(QWidget):
         if reply == QMessageBox.StandardButton.Yes:
             self.fileListWidget.takeItem(self.fileListWidget.row(item_to_delete))
 
-            # self.delete_FlightFolderFile(name)
             list_files = config.get("Flight_File_List", [])
-            filename = os.path.join(
-                config.get("project_path", ""), "Measure Flight Folder", name
-            )
-            if filename in list_files:
-                list_files.remove(filename)
+            if name in list_files:
+                list_files.remove(name)
             config.set("Flight_File_List", list_files, save=True)
+
             self.updatePlot()
 
     def delete_all_items(self):
         self.fileListWidget.clear()
         self.db.clear_FlightData()
         self.updatePlot()
-
-    def delete_FlightFolderFile(self, name: str):
-        logger.debug(f"delete_FlightFolderFile {name}")
-        proj_path = config.get("project_path", "")
-        if not proj_path:
-            QMessageBox.warning(self, "Warning", "Project path is not set.")
-            return
-
-        filename = os.path.join(proj_path, "Measure Flight Folder", name)
-
-        if os.path.exists(filename):
-            try:
-                os.remove(filename)
-                logger.info(f"Deleted file: {filename}")
-                QMessageBox.information(
-                    self, "Delete Complete", f"File '{name}' has been deleted."
-                )
-            except Exception as e:
-                logger.error(f"Failed to delete {filename}: {e}")
-                QMessageBox.critical(self, "Error", f"Failed to delete file:\n{e}")
-        else:
-            logger.warning(f"File not found: {filename}")
-            QMessageBox.warning(self, "Warning", f"File does not exist:\n{filename}")
 
     def on_canvas_click(self, event):
         """Handle clicks on the canvas, specifically on the colorbar."""

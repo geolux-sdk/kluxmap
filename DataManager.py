@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 
 import geopandas as gpd
 import numpy as np
@@ -20,7 +21,7 @@ class DataManager:
         self.fileDataBase = {}
 
     def load_FlightData(self, file_name):
-        basename = os.path.basename(file_name)
+        basename = Path(file_name).stem
         try:
             self.fileDataBase[basename] = self._convert(pd.read_csv(file_name))
         except Exception as e:

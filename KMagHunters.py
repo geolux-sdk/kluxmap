@@ -54,7 +54,9 @@ class KMagHunters(QMainWindow):
         logger.info("Progrma Start")
         self.db = DataManager(self.settings)
         self.initUI()
-        self.resize(1400, 900)
+        w = self.settings.get(["init", "size", "width"], 1400)
+        h = self.settings.get(["init", "size", "height"], 900)
+        self.resize(w, h)
 
     def initUI(self):
         self.setWindowTitle(TITLE)
@@ -238,15 +240,16 @@ class KMagHunters(QMainWindow):
     def openProjectFolder(self):
         logger.debug("Event : openProjectFolder")
         default = self.settings.get(["init", "project_path"], "")
+        default_path = Path(default) if default else Path.home()
         folder_path = QFileDialog.getExistingDirectory(
-            self, "Select Folder", os.path.dirname(default)
+            self, "Select Folder", str(default_path.parent)
         )
         if folder_path:
             logger.debug(f"openProjectFolder {folder_path}")
 
             self.settings.set(["init", "project_path"], folder_path, save=True)
 
-            config.set_path(os.path.join(folder_path, "project_settings.json"))
+            config.set_path(Path(folder_path) / "project_settings.json")
             config.load()
             config.set("project_path", folder_path, save=True)
             make_project_subfolder(".processed")
@@ -260,8 +263,8 @@ class KMagHunters(QMainWindow):
     def resetProjectFolder(self):
         logger.debug("Event : resetProjectFolder")
 
-        project_path = config.get("project_path", "")
-        if not project_path:
+        project_path = Path(config.get("project_path", ""))
+        if not project_path or not project_path.exists():
             logger.debug("No project path found")
             return
 
@@ -280,13 +283,12 @@ class KMagHunters(QMainWindow):
         if reply == QMessageBox.Yes:
             try:
                 # 폴더 내 모든 파일/폴더 삭제
-                for item in os.listdir(project_path):
-                    item_path = os.path.join(project_path, item)
-                    logger.debug(f"Deleting item: {item_path}")
-                    if os.path.isfile(item_path) or os.path.islink(item_path):
-                        os.remove(item_path)
-                    elif os.path.isdir(item_path):
-                        shutil.rmtree(item_path)
+                for item in project_path.iterdir():
+                    logger.debug(f"Deleting item: {item}")
+                    if item.is_file() or item.is_symlink():
+                        item.unlink()
+                    elif item.is_dir():
+                        shutil.rmtree(item)
 
                 logger.info(f"All data deleted in project folder: {project_path}")
 
@@ -297,8 +299,8 @@ class KMagHunters(QMainWindow):
                     QMessageBox.Ok,
                 )
                 config.clear()
-                config.set_path(os.path.join(project_path, "project_settings.json"))
-                config.set("project_path", project_path, save=True)
+                config.set_path(project_path / "project_settings.json")
+                config.set("project_path", str(project_path), save=True)
                 make_project_subfolder(".processed")
                 self.projectReset.emit()
 
@@ -375,12 +377,12 @@ class KMagHunters(QMainWindow):
         # 마지막 사용 경로 저장
         try:
             if files:
-                last_path = os.path.dirname(os.path.dirname(files[0]))
+                last_path = Path(files[0]).parent.parent
             else:
-                last_path = os.path.dirname(folder)
+                last_path = Path(folder).parent
             logger.debug(f"Last path: {last_path}")
             if last_path:
-                config.set("data_last_dir", last_path, save=True)
+                config.set("data_last_dir", str(last_path), save=True)
 
         except Exception as e:
             logger.error(f"Failed to save last dir: {e}")
