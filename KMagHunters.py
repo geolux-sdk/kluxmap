@@ -218,16 +218,17 @@ class KMagHunters(QMainWindow):
         if not dlg.exec():
             return
         selection = dlg.selection
-        logger.debug(f"{selection}")
+
         folder_path = selection.get("project_path", "")
+
         if not folder_path:
             return
-
+        direction_degree = selection.get("direction", 0)
         config.set_path(str(Path(folder_path) / "project_settings.json"))
         self.settings.set(["init", "project_path"], folder_path, save=True)
         Path(folder_path).mkdir(exist_ok=True)
 
-        config.set("direction", folder_path)
+        config.set("direction", direction_degree)
         config.set("project_path", folder_path, save=True)
 
         make_project_subfolder(".processed")

@@ -972,14 +972,35 @@ class CreateProjectDialog(QDialog):
         direction_group = QGroupBox("Flight Direction:")
         self.radio_nw = QRadioButton("NS")
         radio_ew = QRadioButton("EW")
+        radio_degree = QRadioButton("Degree")
+        self.degree_edit = QLineEdit()
+        self.degree_edit.setText("0")
+        self.degree_edit.setToolTip(
+            "Enter the angle relative to North (0° = North, 90° = East, range -90~90."
+        )
+        self.degree_edit.setFixedWidth(60)
+        self.degree_edit.setEnabled(False)
         self.radio_nw.setChecked(True)
+
         dir_button_group = QButtonGroup(direction_group)
         dir_button_group.addButton(self.radio_nw)
         dir_button_group.addButton(radio_ew)
+        dir_button_group.addButton(radio_degree)
         dir_button_group.setExclusive(True)
+
         hbox = QHBoxLayout()
         hbox.addWidget(self.radio_nw)
+        hbox.addStretch()
         hbox.addWidget(radio_ew)
+        hbox.addStretch()
+
+        degree_layout = QHBoxLayout()
+        degree_layout.addWidget(radio_degree)
+        degree_layout.addWidget(self.degree_edit)
+        degree_layout.addStretch()
+
+        hbox.addLayout(degree_layout)
+
         direction_group.setLayout(hbox)
 
         # --- Add Groups to Main Layout ---
@@ -994,15 +1015,35 @@ class CreateProjectDialog(QDialog):
         buttons.rejected.connect(self.reject)
         main_layout.addWidget(buttons)
 
+        radio_degree.toggled.connect(
+            lambda checked: self.degree_edit.setEnabled(checked)
+        )
+
     def accept(self):
         logger.debug("CreateProjectDialog accept called")
         if not hasattr(self, "fullpath"):
             return
         self.selection = {"project_path": str(self.fullpath)}
-        if self.radio_nw.isChecked():
-            self.selection["direction"] = "NW"
+
+        if self.degree_edit.isEnabled():  # Degree radio selected
+            degree_str = self.degree_edit.text().strip()
+            try:
+                value = int(degree_str)
+                if not (-90 <= value <= 90):
+                    raise ValueError("Out of range")
+                self.selection["direction"] = value
+            except ValueError:
+                QMessageBox.warning(
+                    self,
+                    "Invalid Input",
+                    "Please enter a valid numeric angle between -90 and 90 degrees.",
+                )
+                logger.warning(f"Invalid Range Input {degree_str}")
+                return
+        elif self.radio_nw.isChecked():
+            self.selection["direction"] = 0
         else:
-            self.selection["direction"] = "EW"
+            self.selection["direction"] = 90
         logger.info(f"selection: {self.selection}")
         super().accept()
 
