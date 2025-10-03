@@ -100,7 +100,7 @@ class DataManager:
     def get_XYMagData(self, df):
         return df["X"], df["Y"], df["Mag"]
 
-    def get_filtered_data(self, df, settings):
+    def get_filtered_data(self, df, settings, degree):
         logger.debug(settings)
         try:
             # df = self.filter_by_dist(df, 1.0)
@@ -116,7 +116,7 @@ class DataManager:
 
             if settings["direction_filter"].get("enabled", False):
                 df = self.filter_cardinal_directions(
-                    df, settings["direction_filter"].get("threshold", 5)
+                    df, settings["direction_filter"].get("threshold", 5), degree=degree
                 )
             if df.empty:
                 logger.warning("Filtered DataFrame is empty.")
@@ -288,7 +288,7 @@ class DataManager:
     #     return df.loc[mask.fillna(False)].copy()
 
     def filter_cardinal_directions(
-        self, df: pd.DataFrame, tolerance_deg: float = 5.0
+        self, df: pd.DataFrame, tolerance_deg: float = 5.0, degree=0
     ) -> pd.DataFrame:
         """
         XY 변화 방향이 동/서/남/북 (0°, 90°, 180°, 270°) ± tolerance_deg 이내인 경우만 유지
@@ -304,7 +304,8 @@ class DataManager:
         directions.iloc[0] = np.nan  # 첫 행 제외
 
         # 기준 각도: 동서남북
-        targets = [0, 90, 180, 270]
+        targets = [0 + degree, 90 + degree, 180 + degree, 270 + degree]
+        logger.debug(f"Directional Fileter reference target {targets}")
 
         # tolerance 이내 포함 여부 마스크 계산
         mask = pd.Series(False, index=df.index)

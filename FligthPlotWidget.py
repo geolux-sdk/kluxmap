@@ -299,6 +299,7 @@ class FlightPlotWidget(QWidget):
     def updatePlot(self):
         logger.debug("updatePlot")
         cfg = config.get("filters")
+        direction_degree = config.get("direction")
 
         try:
             # --- 1) 선택된 파일 목록 확보 ---
@@ -316,7 +317,9 @@ class FlightPlotWidget(QWidget):
             file_data_list = []
             self.db.clear_combined_df()
             for filename in selected:
-                df = self.db.get_filtered_data(self.db.get_FlightData(filename), cfg)
+                df = self.db.get_filtered_data(
+                    self.db.get_FlightData(filename), cfg, direction_degree
+                )
                 if df is None or df.empty:
                     continue
                 self.db.put_combined_df(df)
