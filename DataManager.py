@@ -158,7 +158,7 @@ class DataManager:
     def save_all_continuous_record_groups(
         self,
         output_dir: str,
-        samping_rate: str,
+        sampling_rate: str,
         prefix: str = "line",
     ) -> list[str]:
         """
@@ -180,44 +180,155 @@ class DataManager:
             저장된 파일 경로 리스트
         """
         df = getattr(self, "combined_df", pd.DataFrame())
-        if df is None or df.empty:
+        if df is None or df.empty or "record_id" not in df.columns:
             return []
 
-        if "record_id" not in df.columns:
+        # 현재 순서 보존. 단, 안전을 위해 record_id를 숫자로 보장
+        work = df.copy()
+        # work["record_id"] = pd.to_numeric(work["record_id"], errors="coerce")
+
+        grp_labels = work["record_id"].diff().ne(1).cumsum()
+
+        outdir = Path(output_dir)
+        outdir.mkdir(parents=True, exist_ok=True)
+        saved_files: list[str] = []
+        for idx, (_, g) in enumerate(work.groupby(grp_labels, sort=False), start=1):
+            g = g.reset_index(drop=True)
+            fpath = outdir / f"{prefix}_{idx}.csv"
+            try:
+                g.to_csv(fpath, index=False)
+                logger.debug(f"Saved group #{idx} → {fpath}")
+                saved_files.append(str(fpath))
+            except Exception as e:
+                logger.error(f"Failed to save group #{idx} to {fpath}: {e}")
+
+        return saved_files
+
+    def merge_and_save_scanlines_by_direction(
+        self,
+        output_dir: str,
+        prefix: str = "line",
+        angle_tol_deg: float = 5.0,
+        join_gap_max: float = 20.0,
+        exclude_endpoints_within: float = 40.0,
+    ) -> list[str]:
+        from pathlib import Path
+
+        import numpy as np
+        import pandas as pd
+
+        df = getattr(self, "combined_df", pd.DataFrame())
+        if df is None or df.empty or not {"record_id", "X", "Y"}.issubset(df.columns):
             return []
 
-        os.makedirs(output_dir, exist_ok=True)
-        # df = df.sort_values("record_id").reset_index(drop=True)
+        work = df.copy()
+        work["record_id"] = pd.to_numeric(work["record_id"], errors="coerce")
+
+        # 1) 연속 구간 라벨링 (현재 순서 유지)
+        grp_labels = work["record_id"].diff().ne(1).cumsum()
+        groups = []
+        for gid, g in work.groupby(grp_labels, sort=False):
+            g = g.reset_index(drop=True)
+            if len(g) == 0:
+                continue
+            dx = float(g["X"].iloc[-1]) - float(g["X"].iloc[0])
+            dy = float(g["Y"].iloc[-1]) - float(g["Y"].iloc[0])
+            angle = (np.degrees(np.arctan2(dx, dy)) + 360.0) % 360.0  # 북 기준
+            groups.append(
+                {
+                    "gid": gid,
+                    "df": g,
+                    "n": len(g),
+                    "start": (float(g["X"].iloc[0]), float(g["Y"].iloc[0])),
+                    "end": (float(g["X"].iloc[-1]), float(g["Y"].iloc[-1])),
+                    "angle": angle,
+                }
+            )
+
+        if not groups:
+            return []
+
+        # 2) 길이 내림차순(긴 것 먼저)
+        groups.sort(key=lambda it: it["n"], reverse=True)
+
+        outdir = Path(output_dir)
+        outdir.mkdir(parents=True, exist_ok=True)
+
+        def ang_diff(a, b):
+            d = abs(a - b) % 360.0
+            return min(d, 360.0 - d)
+
+        def dist(p, q):
+            return float(np.hypot(p[0] - q[0], p[1] - q[1]))
 
         saved_files = []
-        current_group = [df.iloc[0]]
+        used = set()
+        merged_count = 0
 
-        for i in range(1, len(df)):
-            prev_id = df.iloc[i - 1]["record_id"]
-            curr_id = df.iloc[i]["record_id"]
+        for seed in groups:
+            if seed["gid"] in used:
+                continue
 
-            if curr_id == prev_id + 1:
-                current_group.append(df.iloc[i])
-            else:
-                group_df = pd.DataFrame(current_group)
-                file_path = os.path.join(
-                    output_dir,
-                    f"{prefix}_{(len(saved_files)+1):03d}.csv",
+            # 새 라인 시작
+            current_angle = seed["angle"]
+            current_start = seed["start"]
+            current_end = seed["end"]
+            merged_parts = [seed["df"]]
+            used.add(seed["gid"])
+
+            # 길이가 긴 순으로 가능한 한 많이 붙이기
+            progress = True
+            while progress:
+                progress = False
+                for cand in groups:
+                    if cand["gid"] in used:
+                        continue
+                    # 방향 유사 체크
+                    if ang_diff(current_angle, cand["angle"]) > angle_tol_deg:
+                        continue
+
+                    # --- (1) tail-append: current_end -> cand.start ---
+                    if dist(current_end, cand["start"]) <= join_gap_max:
+                        merged_parts.append(cand["df"])  # 뒤에 붙이기
+                        used.add(cand["gid"])
+                        current_end = cand["end"]  # 끝점 갱신
+                        progress = True
+                        break  # 다시 후보 검색
+
+                    # --- (2) head-prepend: cand.end -> current_start ---
+                    if dist(current_start, cand["end"]) <= join_gap_max:
+                        merged_parts.insert(0, cand["df"])  # 앞에 붙이기
+                        used.add(cand["gid"])
+                        current_start = cand["start"]  # 시작점 갱신
+                        progress = True
+                        break  # 다시 후보 검색
+            # 3) 저장 전 record_id 정렬
+            merged = pd.concat(merged_parts, ignore_index=True)
+            # if "record_id" in merged.columns:
+            #     merged = merged.sort_values("record_id").reset_index(drop=True)
+            try:
+                sx, sy = float(merged["X"].iloc[0]), float(merged["Y"].iloc[0])
+                ex, ey = float(merged["X"].iloc[-1]), float(merged["Y"].iloc[-1])
+                end_to_end = float(np.hypot(ex - sx, ey - sy))
+            except Exception:
+                end_to_end = float("inf")  # 좌표 문제 있으면 일단 저장하도록
+
+            if end_to_end <= exclude_endpoints_within:
+                logger.debug(
+                    f"Skip merged line (endpoints {end_to_end:.2f} m <= {exclude_endpoints_within} m)."
                 )
-                group_df.to_csv(file_path, index=False)
-                logger.debug(f"Saved group to {file_path}")
-                saved_files.append(file_path)
-                current_group = [df.iloc[i]]
+                continue  # 저장하지 않고 건너뜀
 
-        # 마지막 그룹 저장
-        if current_group:
-            group_df = pd.DataFrame(current_group)
-            file_path = os.path.join(
-                output_dir, f"{prefix}_{(len(saved_files)+1):03d}.csv"
-            )
-            group_df.to_csv(file_path, index=False)
-            logger.debug(f"Saved last group to {file_path}")
-            saved_files.append(file_path)
+            merged_count += 1
+            fpath = outdir / f"{prefix}_{merged_count}.csv"
+            try:
+                merged.to_csv(fpath, index=False)
+                logger.debug(f"Saved merged line #{merged_count} → {fpath}")
+                saved_files.append(str(fpath))
+            except Exception as e:
+                logger.error(
+                    f"Failed to save merged line #{merged_count} to {fpath}: {e}"
+                )
 
         return saved_files
 
@@ -291,7 +402,7 @@ class DataManager:
         self, df: pd.DataFrame, tolerance_deg: float = 5.0, degree=0
     ) -> pd.DataFrame:
         """
-        XY 변화 방향이 동/서/남/북 (0°, 90°, 180°, 270°) ± tolerance_deg 이내인 경우만 유지
+        XY 변화 방향이 동/서/남/북 (0°, 90°, 180°, 270°) + degree ± tolerance_deg 이내인 경우만 유지
         """
         if "X" not in df.columns or "Y" not in df.columns:
             raise ValueError("DataFrame must contain 'X' and 'Y' columns.")

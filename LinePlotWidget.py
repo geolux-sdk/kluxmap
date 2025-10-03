@@ -826,18 +826,25 @@ class LinePlotWidget(QWidget):
                         f"Removed existing scanlines directory: {outfolder_path}"
                     )
 
-                ScanLineFiles = self.db.save_all_continuous_record_groups(
-                    outfolder_path, "1Hz"
+                # ScanLineFiles = self.db.save_all_continuous_record_groups(
+                #     outfolder_path, "1Hz"
+                # )
+                ScanLineFiles = self.db.merge_and_save_scanlines_by_direction(
+                    outfolder_path
                 )
                 self.updateFileList(ScanLineFiles)
                 QApplication.restoreOverrideCursor()
             else:
                 self.updateFileList(existing_files)
             return
-        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
-        ScanLineFiles = self.db.save_all_continuous_record_groups(outfolder_path, "1Hz")
-        self.updateFileList(ScanLineFiles)
-        QApplication.restoreOverrideCursor()
+        else:
+            QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+            # ScanLineFiles = self.db.save_all_continuous_record_groups(outfolder_path, "1Hz")
+            ScanLineFiles = self.db.merge_and_save_scanlines_by_direction(
+                outfolder_path
+            )
+            self.updateFileList(ScanLineFiles)
+            QApplication.restoreOverrideCursor()
 
     def delete_all_items(self):
         self.fileListWidget.clear()
