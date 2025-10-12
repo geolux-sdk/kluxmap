@@ -1,6 +1,5 @@
 import glob
 import os
-import time
 
 from loguru import logger
 from PySide6.QtCore import Qt, QThread, Signal
