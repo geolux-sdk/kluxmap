@@ -489,3 +489,4 @@ if __name__ == "__main__":
     # time.sleep(1)
     splash.finish(win)
     sys.exit(app.exec())
+    #git test
