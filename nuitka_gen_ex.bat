@@ -1,4 +1,4 @@
-nuitka KMagHunters.py ^
+nuitka KLuxMap.py ^
 --standalone ^
 --mingw64 --jobs=8 ^
 --plugin-enable=pyside6 ^

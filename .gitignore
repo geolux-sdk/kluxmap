@@ -12,6 +12,10 @@ dist/
 KMagHunters.dist/
 KMagHunters.build/
 KMagHunters.onefile-build/
+KLuxMap.build/
+KLuxMap.dist/
+KLuxMap.onefile-build/
+output/
 *.spec
 *.xml
 

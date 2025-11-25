@@ -40,10 +40,10 @@ from myWidgets import (
 
 SPLASH_IMAGE = "splash_screen.png"
 VIEWER_ICON = "viewer.png"
-TITLE = "KMagHunters NEO V0.0.1"
+TITLE = "KLuxMap V1.0.1"
 
 
-class KMagHunters(QMainWindow):
+class KLuxMap(QMainWindow):
     projectOpened = Signal(str)
     projectReset = Signal()
 
@@ -74,7 +74,7 @@ class KMagHunters(QMainWindow):
         self.CalibPlotWidget = CalibrationFlightWidget(self.settings, self.db)
         self.LinePlotWidget = LinePlotWidget(self.settings, self.db)
         self.FligtPlotWidget = FlightPlotWidget(self.settings, self.db)
-
+        logger.debug("Widgets created")
         self.tabs.addTab(self.CalibPlotWidget, "Calibration Flight")
         self.tabs.addTab(self.FligtPlotWidget, "DRONE DATA")
         self.tabs.addTab(self.LinePlotWidget, "SCAN LINE DATA")
@@ -84,6 +84,7 @@ class KMagHunters(QMainWindow):
         self.setCentralWidget(self.tabs)
 
         self.connectSignals()
+        logger.debug("UI initialized")
 
     def on_tab_changed(self, index):
         logger.debug(f"on_tab_changed {index} from {self._previous_tab_index}")
@@ -190,7 +191,7 @@ class KMagHunters(QMainWindow):
         QMessageBox.about(
             self,
             "About",
-            "This is the KMagHunters application \nfor magnetic data viewing, \ndeveloped by KIGAM and GEOLUX.",
+            "This is the KLuxMap application \nfor magnetic data viewing, \ndeveloped by KIGAM and GEOLUX.",
         )
 
     def menu_action_enable(self, action=True):
@@ -480,7 +481,7 @@ if __name__ == "__main__":
     splash.show()
 
     try:
-        win = KMagHunters()
+        win = KLuxMap()
         win.show()
     except Exception as err:
         logger.critical(repr(err))

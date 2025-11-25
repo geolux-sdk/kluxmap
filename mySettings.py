@@ -6,6 +6,25 @@ from typing import Any, Optional, Union
 from jsonschema import ValidationError, validate
 from loguru import logger
 
+import os
+
+APP_NAME = "KLuxMap"
+
+
+def get_app_data_dir(app_name: str = APP_NAME) -> Path:
+    """
+    항상 사용자 데이터 폴더(APPDATA/LOCALAPPDATA/홈)를 사용.
+    - VSCode에서 실행하든, Nuitka EXE든 모두 같은 위치.
+    """
+    base = (
+        os.getenv("LOCALAPPDATA")
+        or os.getenv("APPDATA")
+        or str(Path.home())
+    )
+    data_dir = Path(base) / app_name
+    data_dir.mkdir(parents=True, exist_ok=True)
+    return data_dir
+
 
 class myConfigs:
     def __init__(self) -> None:
@@ -95,17 +114,19 @@ class myConfigs:
         return self.__file_path
 
 
+import copy
+
 class mySettings:
     defaults = {
         "logger": {
             "folder": "./log",
-            "filename": "KMagHunters.log",
+            "filename": "KLuxMap.log",
             "level": "DEBUG",
-            "console": True,
+            "console": False,
         },
         "init": {
             "splash": True,
-            "size": {"width": 800, "height": 600},
+            "size": {"width": 1024, "height": 768},
             "project_path": "",
         },
     }
@@ -126,12 +147,36 @@ class mySettings:
         self,
         defaults: Optional[dict[str, Any]] = None,
         file_name: str = "settings.json",
-        folder_name: str = "./",
+        folder_name: Optional[Union[str, Path]] = None,
     ) -> None:
-        self.defaults = defaults if defaults is not None else self.defaults
-        self.__file_path = Path(folder_name) / file_name
+        # 1) settings / log 를 저장할 기본 폴더 결정
+        self.data_dir: Path = (
+            Path(folder_name)
+            if folder_name is not None
+            else get_app_data_dir(APP_NAME)
+        )
+        self.data_dir.mkdir(parents=True, exist_ok=True)
 
+        # 2) defaults 를 복사해서 logger.folder 를 절대경로로 맞춤
+        base_defaults = defaults if defaults is not None else self.defaults
+        self.defaults = copy.deepcopy(base_defaults)
+
+        logger_cfg = self.defaults.setdefault("logger", {})
+        # 기존 설정에 folder 가 상대경로라면 data_dir 기준으로 바꾸기
+        folder_value = logger_cfg.get("folder", "./log")
+        folder_path = Path(folder_value)
+        if not folder_path.is_absolute():
+            folder_path = self.data_dir / folder_path
+        logger_cfg["folder"] = str(folder_path)
+
+        # 3) settings.json 경로 설정
+        self.__file_path = self.data_dir / file_name
+        self.__file_path.parent.mkdir(parents=True, exist_ok=True)
+
+        # 4) 설정 읽기 or 기본값 생성
         self.settings = self._read_or_initialize(self.schema)
+
+        # 5) logger 초기화
         self._logger_init()
 
     def _logger_init(self) -> None:
