@@ -33,10 +33,10 @@ from myWidgets import ColorbarRangeDialog, DataSettingsDialog, OrthogonalPolygon
 
 class FlightPlotWidget(QWidget):
 
-    def __init__(self, settings, db, main_window=None):
+    def __init__(self, db, main_window=None):
         super().__init__()
         self.main_window = main_window
-        self.settings = settings
+        
         self.db = db
 
         self._selected_lines = []

@@ -7,13 +7,11 @@ import pandas as pd
 from loguru import logger
 from shapely.geometry import Point, Polygon
 
-import mySettings
 from mySettings import config
 
 
 class DataManager:
-    def __init__(self, settings: mySettings):
-        self.settings = settings
+    def __init__(self):    
         self.combined_df = pd.DataFrame()
 
     def clear_FlightData(self):

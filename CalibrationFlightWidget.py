@@ -32,9 +32,8 @@ from mySettings import config
 
 
 class CalibrationFlightWidget(QWidget):
-    def __init__(self, settings, db, main_window=None):
+    def __init__(self, db, main_window=None):
         super().__init__()
-        self.settings = settings
         self.db = db
         self.main_window = main_window
 
