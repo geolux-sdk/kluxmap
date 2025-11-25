@@ -1,4 +1,5 @@
 import os
+from datetime import datetime
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -957,10 +958,13 @@ class CreateProjectDialog(QDialog):
 
         self.project_name = QLineEdit()
         self.project_name.setMinimumWidth(300)
+        self.project_name.setText(self._generate_default_name())
         self.project_path = QLineEdit()
         self.project_fullpath = QLabel()
         open_button = QPushButton("Path")
         open_button.clicked.connect(self.open_folder)
+        self.project_name.textChanged.connect(self.update_fullpath)
+        self.project_path.textChanged.connect(self.update_fullpath)
 
         projfolder_layout = QFormLayout()
         projfolder_layout.addRow("Name:", self.project_name)
@@ -1049,11 +1053,41 @@ class CreateProjectDialog(QDialog):
 
     def open_folder(self):
         folder_path = browse_directory(self)
+        if not folder_path:
+            logger.debug("CreateProjectDialog open_folder canceled")
+            return
         proj_folder_path = Path(folder_path)
-        if folder_path:
-            self.project_path.setText(str(proj_folder_path))
-            self.fullpath = proj_folder_path / self.project_name.text().strip()
-            self.project_fullpath.setText(str(self.fullpath))
+        project_name = self.project_name.text().strip()
+        if not project_name:
+            project_name = self._generate_default_name(proj_folder_path)
+            self.project_name.setText(project_name)
+        self.project_path.setText(str(proj_folder_path))
+        self.fullpath = proj_folder_path / project_name
+        self.project_fullpath.setText(str(self.fullpath))
+        logger.debug(f"CreateProjectDialog open_folder called: {self.fullpath}")
+
+    def update_fullpath(self):
+        base_path = self.project_path.text().strip()
+        project_name = self.project_name.text().strip()
+        if not base_path or not project_name:
+            self.project_fullpath.clear()
+            if hasattr(self, "fullpath"):
+                del self.fullpath
+            return
+        self.fullpath = Path(base_path) / project_name
+        self.project_fullpath.setText(str(self.fullpath))
+
+    def _generate_default_name(self, base_path=None):
+        """Return Proj_YYYYMMDD, adding a counter if the folder already exists."""
+        base_name = datetime.now().strftime("Proj_%Y%m%d")
+        if base_path is None:
+            return base_name
+        candidate = base_name
+        counter = 1
+        while (Path(base_path) / candidate).exists():
+            candidate = f"{base_name}_{counter:02d}"
+            counter += 1
+        return candidate
 
 
 def browse_files(
