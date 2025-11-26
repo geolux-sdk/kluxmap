@@ -3,13 +3,13 @@
 ; ============================
 
 #define MyAppName      "KLuxMap"
-#define MyAppVersion   "1.0.0"
+#define MyAppVersion   "1.0.1"
 #define MyAppPublisher "KIGAM & GEOLUX"
 #define MyAppExeName   "KLuxMap.exe"
-#define MyAppDistDir   "KLuxMap.dist"
+#define MyAppDistDir   "build\main.dist"
 
 [Setup]
-AppId={{9D9F8B3B-4A2C-4C1D-9A27-93C63D0D1234}  ; 임의의 GUID, 아무거나 고정으로 쓰면 됨
+AppId={{9D9F8B3B-4A2C-4C1D-9A27-93C63D0D1234}}  ; 임의의 GUID, 아무거나 고정으로 쓰면 됨
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
 AppPublisher={#MyAppPublisher}
@@ -36,9 +36,11 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"
 
 [Files]
-; KLuxMap.dist 폴더 전체를 {app} 으로 복사
-; 이 .iss 가 KLuxMap.dist와 같은 폴더에 있다고 가정
-Source: "{#MyAppDistDir}\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs
+; 1) 실행 파일 복사
+Source: "{#MyAppDistDir}\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
+
+; 2) build/main.dist 폴더 전체를 {app} 으로 복사
+Source: "{#MyAppDistDir}\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs ignoreversion
 
 [Icons]
 ; 시작 메뉴 아이콘
@@ -52,5 +54,5 @@ Name: "{commondesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: 
 Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#MyAppName}}"; Flags: nowait postinstall skipifsilent
 
 [UninstallDelete]
-; 언인스톨 시 APPDATA의 KLuxMap 폴더도 함께 삭제
-Type: filesandordirs; Name: "{localappdata}\KLuxMap"
+; 언인스톨 시 사용자 홈 폴더의 .KLuxMap 폴더도 함께 삭제
+Type: filesandordirs; Name: "{%USERPROFILE}\.KLuxMap"

@@ -9,9 +9,9 @@ test/
 # ===== 빌드 / 배포 =====
 build/
 dist/
-KMagHunters.dist/
-KMagHunters.build/
-KMagHunters.onefile-build/
+main.dist/
+main.build/
+main.onefile-build/
 KLuxMap.build/
 KLuxMap.dist/
 KLuxMap.onefile-build/
