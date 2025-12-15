@@ -975,8 +975,8 @@ class CreateProjectDialog(QDialog):
 
         direction_group = QGroupBox("Flight Direction:")
         self.radio_nw = QRadioButton("NS")
-        radio_ew = QRadioButton("EW")
-        radio_degree = QRadioButton("Degree")
+        self.radio_ew = QRadioButton("EW")
+        self.radio_degree = QRadioButton("Degree")
         self.degree_edit = QLineEdit()
         self.degree_edit.setText("0")
         self.degree_edit.setToolTip(
@@ -988,18 +988,18 @@ class CreateProjectDialog(QDialog):
 
         dir_button_group = QButtonGroup(direction_group)
         dir_button_group.addButton(self.radio_nw)
-        dir_button_group.addButton(radio_ew)
-        dir_button_group.addButton(radio_degree)
+        dir_button_group.addButton(self.radio_ew)
+        dir_button_group.addButton(self.radio_degree)
         dir_button_group.setExclusive(True)
 
         hbox = QHBoxLayout()
         hbox.addWidget(self.radio_nw)
         hbox.addStretch()
-        hbox.addWidget(radio_ew)
+        hbox.addWidget(self.radio_ew)
         hbox.addStretch()
 
         degree_layout = QHBoxLayout()
-        degree_layout.addWidget(radio_degree)
+        degree_layout.addWidget(self.radio_degree)
         degree_layout.addWidget(self.degree_edit)
         degree_layout.addStretch()
 
@@ -1019,9 +1019,12 @@ class CreateProjectDialog(QDialog):
         buttons.rejected.connect(self.reject)
         main_layout.addWidget(buttons)
 
-        radio_degree.toggled.connect(
+        self.radio_degree.toggled.connect(
             lambda checked: self.degree_edit.setEnabled(checked)
         )
+        self.radio_nw.toggled.connect(self._update_degree_label)
+        self.radio_ew.toggled.connect(self._update_degree_label)
+        self._update_degree_label()
 
     def accept(self):
         logger.debug("CreateProjectDialog accept called")
@@ -1088,6 +1091,13 @@ class CreateProjectDialog(QDialog):
             candidate = f"{base_name}_{counter:02d}"
             counter += 1
         return candidate
+
+    def _update_degree_label(self):
+        """Show preset angles when NS or EW is selected."""
+        if self.radio_nw.isChecked():
+            self.degree_edit.setText("0")
+        elif self.radio_ew.isChecked():
+            self.degree_edit.setText("90")
 
 
 def browse_files(

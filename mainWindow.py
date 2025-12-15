@@ -2,7 +2,7 @@ import shutil
 from pathlib import Path
 
 from loguru import logger
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, Signal, QSettings, QByteArray
 from PySide6.QtGui import QAction, QIcon
 from PySide6.QtWidgets import (
     QFileDialog,
@@ -38,12 +38,11 @@ class KLuxMap(QMainWindow):
     def __init__(self, title: str = ""):
         super().__init__()
         self.title = title
+        self.settings = QSettings("Geolux", "KLuxMap")
         logger.info("Progrma Start")
         self.db = DataManager()
         self.initUI()
-        w = 1400
-        h = 900
-        self.resize(w, h)
+        self._restore_window()
 
     def initUI(self):
         self.setWindowTitle(self.title)
@@ -89,6 +88,7 @@ class KLuxMap(QMainWindow):
         )
 
         if user_response == QMessageBox.Yes:
+            self._save_window()
             event.accept()
         else:
             event.ignore()
@@ -208,7 +208,7 @@ class KLuxMap(QMainWindow):
             return
         direction_degree = selection.get("direction", 0)
         config.set_path(str(Path(folder_path) / "project_settings.json"))
-    
+
         Path(folder_path).mkdir(exist_ok=True)
 
         config.set("direction", direction_degree)
@@ -220,13 +220,16 @@ class KLuxMap(QMainWindow):
         self.createProject_action.setEnabled(False)
         self.menu_action_enable(True)
         self.projectOpened.emit(folder_path)
+        self.settings.setValue("projects/last", str(folder_path))
 
     def openProjectFolder(self):
         logger.debug("Event : openProjectFolder")
-        default = ""
-        default_path = Path(default) if default else Path.home()
+        last_folder = self.settings.value("projects/last", "", type=str)
+        default_path = Path(last_folder) if last_folder else Path.home()
+        if not default_path.exists():
+            default_path = Path.home()
         folder_path = QFileDialog.getExistingDirectory(
-            self, "Select Folder", str(default_path.parent)
+            self, "Select Folder", str(default_path)
         )
         if folder_path:
             logger.debug(f"openProjectFolder {folder_path}")
@@ -241,6 +244,7 @@ class KLuxMap(QMainWindow):
             self.menu_action_enable()
 
             self.projectOpened.emit(folder_path)
+            self.settings.setValue("projects/last", str(folder_path))
 
     def resetProjectFolder(self):
         logger.debug("Event : resetProjectFolder")
@@ -413,3 +417,19 @@ class KLuxMap(QMainWindow):
         for file_path in files:
             out_file = load_SEC_file(file_path, imported_path)
             logger.debug(f"SEC FIle imported to {out_file}")
+
+    def _restore_window(self):
+        geo = self.settings.value("window/geometry", None)
+        if isinstance(geo, QByteArray):
+            try:
+                if self.restoreGeometry(geo):
+                    return
+            except Exception as e:
+                logger.warning(f"Failed to restore geometry: {e}")
+        self.resize(1400, 900)
+
+    def _save_window(self):
+        try:
+            self.settings.setValue("window/geometry", self.saveGeometry())
+        except Exception as e:
+            logger.warning(f"Failed to save geometry: {e}")

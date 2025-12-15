@@ -1,14 +1,21 @@
+import math
 import os
 from pathlib import Path
+from typing import Optional
 
 import matplotlib.pyplot as plt
 import numpy as np
+import pandas as pd
+import requests
 from loguru import logger
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
+from pyproj import Transformer
+
+GOOGLE_MAPS_API_KEY_HARDCODED = "AIzaSyD1zF_979D6PEvhKJvI9ZvSf27UZ-MtqYw"
 
 # 파일 상단에 추가
 from PySide6.QtCore import Qt, Slot
-from PySide6.QtGui import QAction, QIcon, QPixmap
+from PySide6.QtGui import QAction, QCursor, QIcon, QImage, QPixmap
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QDialog,
@@ -43,6 +50,15 @@ class FlightPlotWidget(QWidget):
 
         self._is_panning = False
         self._last_mouse_pos = None
+
+        config.get("filters", {})
+        # 배경 지도는 항상 none으로 시작하며 설정을 저장하지 않는다.
+        self.map_type = "none"
+        self._map_pixmap: Optional[QPixmap] = None
+        self._map_image = None
+        self._map_extent = None
+        self._last_epsg = None
+        self._map_cache: dict = {}
 
         self.initUI()
 
@@ -200,6 +216,9 @@ class FlightPlotWidget(QWidget):
         self._fit_bounds_to_canvas_equal(margin_ratio=0.05)
 
     def on_press(self, event):
+        if event.button == 3:
+            self.show_map_context_menu()
+            return
         if event.button == 1 and event.inaxes == self.ax:
             self._is_panning = True
             self._last_mouse_pos = (event.xdata, event.ydata)
@@ -301,9 +320,14 @@ class FlightPlotWidget(QWidget):
         cfg = config.get("filters")
         direction_degree = config.get("direction")
 
+        logger.debug(
+            f"plot setup: map_type={self.map_type}, cfg_background={cfg.get('background_map_type') if cfg else None}"
+        )
+
         try:
             # --- 1) 선택된 파일 목록 확보 ---
             selected = [item.text() for item in self.fileListWidget.selectedItems()]
+            logger.debug(f"plot setup: selected files count={len(selected)}")
             if not selected:
                 self.ax.clear()
                 self.ax.set_title("No files selected  to plot.")
@@ -314,8 +338,10 @@ class FlightPlotWidget(QWidget):
 
             # --- 2) 파일별 X, Y, 값 추출 ---
             all_x, all_y, all_vals = [], [], []
+            all_lat, all_lon = [], []
             file_data_list = []
             self.db.clear_combined_df()
+            data_epsg = None
             for filename in selected:
                 df = self.db.get_filtered_data(
                     self.db.get_FlightData(filename), cfg, direction_degree
@@ -325,9 +351,23 @@ class FlightPlotWidget(QWidget):
                 self.db.put_combined_df(df)
 
                 xdata, ydata, vals = self.db.get_XYMagData(df)
+                lat_series = df.get("Latitude")
+                lon_series = df.get("Longitude")
+                if "CRS_EPSG" in df.columns and data_epsg is None:
+                    try:
+                        data_epsg = int(df["CRS_EPSG"].iloc[0])
+                    except Exception:
+                        data_epsg = None
 
                 if len(xdata) == 0:
                     continue
+                if lat_series is not None and lon_series is not None:
+                    all_lat.extend(
+                        pd.to_numeric(lat_series, errors="coerce").dropna()
+                    )
+                    all_lon.extend(
+                        pd.to_numeric(lon_series, errors="coerce").dropna()
+                    )
                 file_data_list.append((filename, xdata, ydata, vals))
                 all_x.extend(xdata)
                 all_y.extend(ydata)
@@ -350,9 +390,39 @@ class FlightPlotWidget(QWidget):
             self.values_colorbar = (vmin, vmax)
 
             self.ax.clear()
-            minx, maxx, miny, maxy = self.clac_XYlimit_listAll()
-            self.ax.set_xlim(minx, maxx)
-            self.ax.set_ylim(miny, maxy)
+            map_drawn = False
+            if self.map_type and self.map_type != "none":
+                map_drawn = self._update_background_map(
+                    all_lat, all_lon, data_epsg=data_epsg
+                )
+
+            if map_drawn and self._map_extent:
+                map_minx, map_maxx, map_miny, map_maxy = self._map_extent
+            data_minx, data_maxx, data_miny, data_maxy = self.clac_XYlimit_listAll()
+            # 축은 항상 데이터 범위에 맞추어 배경 없음 상태와 동일한 크기로 시작
+            # 배경 이미지가 더 크더라도 imshow extent가 지도 전체를 포함하므로 확대/이동 시 모두 볼 수 있음
+            self.ax.set_xlim(data_minx, data_maxx)
+            self.ax.set_ylim(data_miny, data_maxy)
+            if map_drawn and self._map_image is not None and self._map_extent:
+                try:
+                    # 받은 전체 배경 이미지를 원래 지도 범위에 맞춰 표시
+                    display_extent = self._map_extent
+                    self.ax.imshow(
+                        self._map_image,
+                        extent=display_extent,
+                        origin="upper",
+                        zorder=0,
+                        aspect="equal",
+                    )
+                    logger.debug(
+                        f"map draw: imshow done with extent={display_extent}, image_shape={self._map_image.shape if hasattr(self._map_image, 'shape') else None}"
+                    )
+                except Exception as e:
+                    logger.error(f"Failed to draw background map: {e}")
+                    map_drawn = False
+                    self._map_image = None
+                    self._map_extent = None
+
 
             # # --- 5) 컬러맵 설정 ---
             show_cb = cfg.get("show_colorbar", False)
@@ -594,7 +664,21 @@ class FlightPlotWidget(QWidget):
             "show_area_bound": False,
         }
 
-        config.set("filters", config.get("filters", filters_defaults), save=True)
+        filters = config.get("filters", {})
+        if not filters:
+            filters = filters_defaults.copy()
+        else:
+            for key, value in filters_defaults.items():
+                filters.setdefault(key, value)
+
+        # 배경 지도 설정은 저장하지 않고 항상 none으로 시작
+        if "background_map_type" in filters:
+            filters.pop("background_map_type", None)
+        config.set("filters", filters, save=True)
+        self.map_type = "none"
+        logger.debug(
+            f"initialize: filters loaded (background_map_type={self.map_type}, show_backgroundmap={filters.get('show_backgroundmap')})"
+        )
 
         flightData_path = os.path.join(
             config.get("project_path", ""), "Measure Flight Folder"
@@ -668,3 +752,236 @@ class FlightPlotWidget(QWidget):
     @Slot()
     def on_project_reset(self):
         self.delete_all_items()
+
+    def show_map_context_menu(self):
+        menu = QMenu(self)
+        actions = {
+            "배경 없음": "none",
+            "roadmap": "roadmap",
+            "satellite": "satellite",
+            "hybrid": "hybrid",
+            "terrain": "terrain",
+        }
+        current = self.map_type or "none"
+        logger.debug(f"map menu: current background_map_type={current}")
+        for label, value in actions.items():
+            act = menu.addAction(label)
+            act.setCheckable(True)
+            act.setChecked(current == value)
+            act.setData(value)
+
+        selected_action = menu.exec(QCursor.pos())
+        if not selected_action:
+            return
+
+        chosen = selected_action.data()
+        if chosen == current:
+            logger.debug(f"map menu: chosen={chosen}, unchanged -> skip update")
+            return
+
+        self.map_type = chosen
+        logger.debug(f"map menu: chosen={chosen}, updating plot (not persisted)")
+        self.updatePlot()
+
+    def _get_api_key(self) -> Optional[str]:
+        # Prefer environment/configured key; embedded key is a last resort and may be blocked.
+        key = os.environ.get("GOOGLE_MAPS_API_KEY")
+        if key:
+            logger.debug("API key source: environment variable GOOGLE_MAPS_API_KEY")
+            return key.strip()
+        cfg_key = config.get("google_maps_api_key")
+        if cfg_key:
+            logger.debug("API key source: config['google_maps_api_key']")
+            return str(cfg_key).strip()
+        if GOOGLE_MAPS_API_KEY_HARDCODED:
+            logger.warning(
+                "Falling back to embedded Google Maps API key; set GOOGLE_MAPS_API_KEY for reliable access."
+            )
+            return GOOGLE_MAPS_API_KEY_HARDCODED
+        logger.warning("Google Maps API key not configured; skipping background.")
+        return None
+
+    def _estimate_zoom(
+        self, center_lat: float, lat_span: float, lon_span: float, px_w: int, px_h: int
+    ) -> int:
+        if px_w <= 0 or px_h <= 0:
+            return 15
+        meters_lat = max(lat_span, 1e-6) * 111_000
+        meters_lon = max(lon_span, 1e-6) * 111_000 * math.cos(
+            math.radians(center_lat)
+        )
+        meters_per_px = max(meters_lat / max(px_h, 1e-6), meters_lon / max(px_w, 1e-6))
+        if meters_per_px <= 0:
+            return 15
+        raw_zoom = math.log2(
+            156543.03392 * math.cos(math.radians(center_lat)) / meters_per_px
+        )
+        return max(0, min(21, int(raw_zoom)))
+
+    def _latlon_bounds(self, latitudes, longitudes):
+        if not latitudes or not longitudes:
+            return None
+        lat_min, lat_max = np.min(latitudes), np.max(latitudes)
+        lon_min, lon_max = np.min(longitudes), np.max(longitudes)
+        lat_range = lat_max - lat_min
+        lon_range = lon_max - lon_min
+        min_span = 0.0005
+        lat_range = max(lat_range, min_span) * 2
+        lon_range = max(lon_range, min_span) * 2
+        # 이미지가 정사각형(1280x1280)에 맞게 비율 1:1 유지
+        square_span = max(lat_range, lon_range)
+        lat_range = square_span
+        lon_range = square_span
+        center_lat = (lat_max + lat_min) / 2
+        center_lon = (lon_max + lon_min) / 2
+        return {
+            "center": (center_lat, center_lon),
+            "lat_span": lat_range,
+            "lon_span": lon_range,
+            "lat_min": center_lat - lat_range / 2,
+            "lat_max": center_lat + lat_range / 2,
+            "lon_min": center_lon - lon_range / 2,
+            "lon_max": center_lon + lon_range / 2,
+        }
+
+    def _qt_image_to_array(self, image: QImage):
+        image = image.convertToFormat(QImage.Format.Format_RGBA8888)
+        ptr = image.bits()
+        expected_size = image.height() * image.bytesPerLine()
+        # PyQt returns a sip.voidptr (needs setsize), PySide6 returns a memoryview (no setsize)
+        if hasattr(ptr, "setsize"):
+            ptr.setsize(expected_size)
+            buffer = ptr
+        else:
+            buffer = memoryview(ptr)
+
+        arr = np.frombuffer(buffer, np.uint8, count=expected_size).reshape(
+            (image.height(), image.bytesPerLine() // 4, 4)
+        )
+        # copy()로 QImage 소멸 후에도 안전하게 사용
+        return arr.copy()
+
+    def _latlon_to_utm_extent(self, bounds: dict, data_epsg: Optional[int]):
+        try:
+            epsg = data_epsg
+            if not epsg:
+                epsg = self.db._latlon_to_utm_epsg(
+                    bounds["center"][0], bounds["center"][1]
+                )
+            transformer = Transformer.from_crs(
+                "EPSG:4326", f"EPSG:{int(epsg)}", always_xy=True
+            )
+            x1, y1 = transformer.transform(bounds["lon_min"], bounds["lat_min"])
+            x2, y2 = transformer.transform(bounds["lon_max"], bounds["lat_max"])
+            xmin, xmax = sorted([x1, x2])
+            ymin, ymax = sorted([y1, y2])
+            self._last_epsg = epsg
+            return xmin, xmax, ymin, ymax
+        except Exception as e:
+            logger.error(f"Failed to project bounds to UTM: {e}")
+            return None
+
+    def _update_background_map(self, latitudes, longitudes, data_epsg=None):
+        try:
+            bounds = self._latlon_bounds(latitudes, longitudes)
+            if not bounds:
+                return False
+            logger.debug(
+                f"map fetch: map_type={self.map_type}, center={bounds['center']}, spans(lat,lon)=({bounds['lat_span']},{bounds['lon_span']})"
+            )
+
+            api_key = self._get_api_key()
+            if not api_key:
+                logger.warning("Google Maps API key not configured; skipping background.")
+                return False
+
+            w, h = self.canvas.get_width_height()
+            size_w = max(256, min(640, int(w)))
+            size_h = max(256, min(640, int(h)))
+            scale = 2
+
+            zoom = self._estimate_zoom(
+                bounds["center"][0],
+                bounds["lat_span"],
+                bounds["lon_span"],
+                size_w * scale,
+                size_h * scale,
+            )
+            logger.debug(
+                f"map fetch: size=({size_w}x{size_h}) scale={scale} zoom={zoom} data_epsg={data_epsg}"
+            )
+
+            # 캐시 키: 지도 유형/중심/스팬/줌/EPSG 기준 (size/scale 제외)
+            cache_key = (
+                self.map_type,
+                round(bounds["center"][0], 7),
+                round(bounds["center"][1], 7),
+                round(bounds["lat_span"], 7),
+                round(bounds["lon_span"], 7),
+                zoom,
+                data_epsg,
+            )
+            if cache_key in self._map_cache:
+                cached_img, cached_extent = self._map_cache[cache_key]
+                if cached_img is not None and cached_extent is not None:
+                    self._map_image = cached_img
+                    self._map_extent = cached_extent
+                    logger.debug("map fetch: using cached image (skipping request)")
+                    return True
+
+            # 캐시 미스: 이전 지도 상태는 초기화
+            self._map_image = None
+            self._map_extent = None
+
+            url = (
+                "https://maps.googleapis.com/maps/api/staticmap"
+                f"?center={bounds['center'][0]},{bounds['center'][1]}"
+                f"&zoom={zoom}&size={size_w}x{size_h}&scale={scale}"
+                f"&maptype={self.map_type}&key={api_key}"
+            )
+            safe_url = url.replace(api_key, "***")
+            logger.info(f"map fetch url (key masked): {safe_url}")
+
+            resp = None
+            try:
+                resp = requests.get(url, timeout=10)
+                resp.raise_for_status()
+                logger.debug(
+                    f"map fetch: http_status={resp.status_code} content_length={len(resp.content)}"
+                )
+            except requests.HTTPError as e:
+                status = getattr(resp, "status_code", None)
+                if status == 403:
+                    logger.error(
+                        "Failed to fetch Static Map (403 Forbidden). "
+                        "Verify GOOGLE_MAPS_API_KEY, billing status, and Static Maps API enablement."
+                    )
+                else:
+                    logger.error(f"Failed to fetch Static Map (HTTP {status}): {e}")
+                return False
+            except Exception as e:
+                logger.error(f"Failed to fetch Static Map: {e}")
+                return False
+
+            pix = QPixmap()
+            if not pix.loadFromData(resp.content):
+                logger.error("Failed to load map image from response content.")
+                return False
+            logger.debug(
+                f"map fetch: pixmap loaded size=({pix.width()}x{pix.height()}) bytes={resp.headers.get('Content-Length')}"
+            )
+            self._map_pixmap = pix
+            image = pix.toImage()
+            self._map_image = self._qt_image_to_array(image)
+
+            extent = self._latlon_to_utm_extent(bounds, data_epsg)
+            if not extent:
+                logger.error("map fetch: failed to compute UTM extent from bounds")
+                return False
+            self._map_extent = extent
+            self._map_cache[cache_key] = (self._map_image, self._map_extent)
+            logger.debug(f"map fetch: computed UTM extent={extent}, last_epsg={self._last_epsg}")
+            return True
+        except Exception as e:
+            logger.exception(f"_update_background_map unexpected failure: {e}")
+            return False
