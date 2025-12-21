@@ -8,14 +8,14 @@ import pandas as pd
 from loguru import logger
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from pykrige.ok import OrdinaryKriging
-from PySide6.QtCore import QObject, Qt, QTimer, Signal
+from PySide6.QtCore import QObject, Qt, QTimer, Signal, QSize
 from PySide6.QtWidgets import (
     QApplication,
-    QButtonGroup,
     QCheckBox,
     QComboBox,
     QDialog,
     QDialogButtonBox,
+    QDial,
     QFileDialog,
     QFormLayout,
     QGridLayout,
@@ -26,7 +26,8 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPlainTextEdit,
     QPushButton,
-    QRadioButton,
+    QSpinBox,
+    QWidget,
     QVBoxLayout,
 )
 
@@ -973,39 +974,80 @@ class CreateProjectDialog(QDialog):
 
         folder_group.setLayout(projfolder_layout)
 
-        direction_group = QGroupBox("Flight Direction:")
-        self.radio_nw = QRadioButton("NS")
-        self.radio_ew = QRadioButton("EW")
-        self.radio_degree = QRadioButton("Degree")
-        self.degree_edit = QLineEdit()
-        self.degree_edit.setText("0")
-        self.degree_edit.setToolTip(
-            "Enter the angle relative to North (0° = North, 90° = East, range -90~90."
+        direction_group = QGroupBox("Flight Azimuth:")
+        self.azimuth_label = QLabel(self._format_quadrant_bearing(0))
+        self.azimuth_label.setStyleSheet("font-size: 16px; font-weight: bold;")
+        self.azimuth_dial = QDial()
+        self.azimuth_dial.setRange(0, 359)
+        self.azimuth_dial.setWrapping(True)
+        self.azimuth_dial.setNotchesVisible(True)
+        self.azimuth_dial.setFixedSize(QSize(140, 140))
+        # Qt draws 0° at the bottom by default; shift by 180° so 0° appears at the top.
+        self._dial_offset = 180
+        self.azimuth_dial.setValue(self._dial_offset)
+
+        self.azimuth_spin = QSpinBox()
+        self.azimuth_spin.setRange(0, 359)
+        self.azimuth_spin.setWrapping(True)
+        self.azimuth_spin.setSuffix("°")
+        self.azimuth_spin.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        direction_layout = QHBoxLayout()
+        direction_layout.addWidget(self.azimuth_label)
+        direction_layout.addStretch()
+
+        dial_grid = QGridLayout()
+        cardinal_style = "font-weight: bold; color: #d9534f;"
+        dial_grid.addWidget(
+            QLabel("N", alignment=Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignBottom),
+            0,
+            1,
         )
-        self.degree_edit.setFixedWidth(60)
-        self.degree_edit.setEnabled(False)
-        self.radio_nw.setChecked(True)
+        dial_grid.itemAtPosition(0, 1).widget().setStyleSheet(cardinal_style)
+        dial_grid.addWidget(
+            QLabel("W", alignment=Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter),
+            1,
+            0,
+        )
+        dial_grid.itemAtPosition(1, 0).widget().setStyleSheet(cardinal_style)
 
-        dir_button_group = QButtonGroup(direction_group)
-        dir_button_group.addButton(self.radio_nw)
-        dir_button_group.addButton(self.radio_ew)
-        dir_button_group.addButton(self.radio_degree)
-        dir_button_group.setExclusive(True)
+        dial_box = QVBoxLayout()
+        dial_box.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        dial_box.setContentsMargins(0, 0, 0, 0)
+        dial_box.addWidget(self.azimuth_dial, alignment=Qt.AlignmentFlag.AlignCenter)
+        south_label = QLabel("S", alignment=Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop)
+        south_label.setStyleSheet(cardinal_style)
+        dial_box.addWidget(south_label, alignment=Qt.AlignmentFlag.AlignCenter)
+        dial_container = QWidget()
+        dial_container.setLayout(dial_box)
+        dial_grid.addWidget(
+            dial_container,
+            1,
+            1,
+            alignment=Qt.AlignmentFlag.AlignCenter,
+        )
+        dial_grid.addWidget(
+            QLabel("E", alignment=Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter),
+            1,
+            2,
+        )
+        dial_grid.itemAtPosition(1, 2).widget().setStyleSheet(cardinal_style)
+        dial_grid.addWidget(
+            self.azimuth_spin,
+            2,
+            1,
+            alignment=Qt.AlignmentFlag.AlignCenter,
+        )
 
-        hbox = QHBoxLayout()
-        hbox.addWidget(self.radio_nw)
-        hbox.addStretch()
-        hbox.addWidget(self.radio_ew)
-        hbox.addStretch()
+        dial_grid.setRowStretch(0, 1)
+        dial_grid.setRowStretch(1, 0)
+        dial_grid.setRowStretch(2, 1)
+        dial_grid.setColumnStretch(0, 1)
+        dial_grid.setColumnStretch(1, 0)
+        dial_grid.setColumnStretch(2, 1)
 
-        degree_layout = QHBoxLayout()
-        degree_layout.addWidget(self.radio_degree)
-        degree_layout.addWidget(self.degree_edit)
-        degree_layout.addStretch()
-
-        hbox.addLayout(degree_layout)
-
-        direction_group.setLayout(hbox)
+        direction_layout.addLayout(dial_grid)
+        direction_group.setLayout(direction_layout)
 
         # --- Add Groups to Main Layout ---
         main_layout.addWidget(folder_group)
@@ -1019,38 +1061,25 @@ class CreateProjectDialog(QDialog):
         buttons.rejected.connect(self.reject)
         main_layout.addWidget(buttons)
 
-        self.radio_degree.toggled.connect(
-            lambda checked: self.degree_edit.setEnabled(checked)
-        )
-        self.radio_nw.toggled.connect(self._update_degree_label)
-        self.radio_ew.toggled.connect(self._update_degree_label)
-        self._update_degree_label()
+        self.azimuth_dial.valueChanged.connect(self._update_azimuth_label)
+        self.azimuth_spin.valueChanged.connect(self._update_dial_from_spin)
+        self._update_azimuth_label(self.azimuth_dial.value())
 
     def accept(self):
         logger.debug("CreateProjectDialog accept called")
         if not hasattr(self, "fullpath"):
+            QMessageBox.warning(
+                self,
+                "Project Path Missing",
+                "Please select a project folder and name before continuing.",
+            )
             return
         self.selection = {"project_path": str(self.fullpath)}
 
-        if self.degree_edit.isEnabled():  # Degree radio selected
-            degree_str = self.degree_edit.text().strip()
-            try:
-                value = int(degree_str)
-                if not (-90 <= value <= 90):
-                    raise ValueError("Out of range")
-                self.selection["direction"] = value
-            except ValueError:
-                QMessageBox.warning(
-                    self,
-                    "Invalid Input",
-                    "Please enter a valid numeric angle between -90 and 90 degrees.",
-                )
-                logger.warning(f"Invalid Range Input {degree_str}")
-                return
-        elif self.radio_nw.isChecked():
-            self.selection["direction"] = 0
-        else:
-            self.selection["direction"] = 90
+        self.selection["direction"] = self._dial_to_azimuth(self.azimuth_dial.value())
+        self.selection["direction_str"] = self._format_quadrant_bearing(
+            self.selection["direction"]
+        )
         logger.info(f"selection: {self.selection}")
         super().accept()
 
@@ -1092,12 +1121,61 @@ class CreateProjectDialog(QDialog):
             counter += 1
         return candidate
 
-    def _update_degree_label(self):
-        """Show preset angles when NS or EW is selected."""
-        if self.radio_nw.isChecked():
-            self.degree_edit.setText("0")
-        elif self.radio_ew.isChecked():
-            self.degree_edit.setText("90")
+    def _dial_to_azimuth(self, dial_value: int) -> int:
+        """Convert dial value to azimuth with 0° at the top."""
+        return (dial_value + self._dial_offset) % 360
+
+    def _azimuth_to_dial(self, azimuth: int) -> int:
+        """Convert azimuth back to dial value honoring the offset."""
+        return (azimuth - self._dial_offset) % 360
+
+    def _update_azimuth_label(self, value):
+        """Update label to show the current azimuth selection."""
+        azimuth = self._dial_to_azimuth(int(value))
+        bearing_text = self._format_quadrant_bearing(azimuth)
+        try:
+            self.azimuth_spin.blockSignals(True)
+            self.azimuth_spin.setValue(azimuth)
+        finally:
+            self.azimuth_spin.blockSignals(False)
+        self.azimuth_label.setText(f"{bearing_text}")
+
+    def _update_dial_from_spin(self, value: int):
+        """Sync dial when spinbox changes for precise angle entry."""
+        dial_value = self._azimuth_to_dial(int(value))
+        try:
+            self.azimuth_dial.blockSignals(True)
+            self.azimuth_dial.setValue(dial_value)
+        finally:
+            self.azimuth_dial.blockSignals(False)
+        self._update_azimuth_label(dial_value)
+
+    def _format_quadrant_bearing(self, angle: int) -> str:
+        """Return a quadrant bearing like 'N 30° E' using 45° spans around NESW."""
+        angle = angle % 360
+        if angle <= 45 or angle > 315:
+            offset = angle if angle <= 45 else 360 - angle
+            # if offset == 0:
+            #     return "N"
+            secondary = "E" if angle <= 45 else "W"
+            return f"N {offset}° {secondary}"
+        if angle <= 135:
+            offset = 90 - angle if angle <= 90 else angle - 90
+            # if offset == 0:
+            #     return "E"
+            secondary = "N" if angle < 90 else "S"
+            return f"E {offset}° {secondary}"
+        if angle <= 225:
+            offset = 180 - angle if angle <= 180 else angle - 180
+            # if offset == 0:
+            #     return "S"
+            secondary = "E" if angle < 180 else "W"
+            return f"S {offset}° {secondary}"
+        offset = 270 - angle if angle <= 270 else angle - 270
+        # if offset == 0:
+        #     return "W"
+        secondary = "S" if angle < 270 else "N"
+        return f"W {offset}° {secondary}"
 
 
 def browse_files(

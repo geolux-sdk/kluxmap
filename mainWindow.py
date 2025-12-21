@@ -207,11 +207,13 @@ class KLuxMap(QMainWindow):
         if not folder_path:
             return
         direction_degree = selection.get("direction", 0)
+        direction_degree_str = selection.get("direction_str", "")
         config.set_path(str(Path(folder_path) / "project_settings.json"))
 
         Path(folder_path).mkdir(exist_ok=True)
 
         config.set("direction", direction_degree)
+        config.set("direction_str", direction_degree_str)
         config.set("project_path", folder_path, save=True)
 
         make_project_subfolder(".processed")
