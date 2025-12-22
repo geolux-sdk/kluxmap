@@ -88,6 +88,10 @@ class KLuxMap(QMainWindow):
         )
 
         if user_response == QMessageBox.Yes:
+            try:
+                self.CalibPlotWidget.save_state_to_config()
+            except Exception as e:
+                logger.warning(f"Failed to save calibration widget state on exit: {e}")
             self._save_window()
             event.accept()
         else:

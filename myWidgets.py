@@ -621,14 +621,14 @@ class DataSettingsDialog(QDialog):
         form = QFormLayout(self)
 
         # Direction filter
-        self.dir_cb = QCheckBox("NS/EW Filter")
+        self.dir_cb = QCheckBox("Filter by Angle")
         self.dir_cb.setChecked(self.fcfg["direction_filter"].get("enabled", False))
         self.dir_thr = QLineEdit(str(self.fcfg["direction_filter"].get("threshold", 5)))
         form.addRow(self.dir_cb)
-        form.addRow("Direction Threshold:", self.dir_thr)
+        form.addRow("Tolerance:", self.dir_thr)
 
         # Continuity filter
-        self.cont_cb = QCheckBox("Continuity Filter")
+        self.cont_cb = QCheckBox("Mininum Consecutive Data")
         self.cont_cb.setChecked(self.fcfg["continuity_filter"].get("enabled", False))
         self.cont_num = QLineEdit(
             str(self.fcfg["continuity_filter"].get("num_points", 10))
@@ -637,7 +637,7 @@ class DataSettingsDialog(QDialog):
         form.addRow("Number of Points:", self.cont_num)
 
         # Speed filter
-        self.speed_cb = QCheckBox("Speed Filter")
+        self.speed_cb = QCheckBox("Filter by Speed")
         self.speed_cb.setChecked(self.fcfg["speed_filter"].get("enabled", False))
         self.sp_speed = QLineEdit(str(self.fcfg["speed_filter"].get("target_speed", 5)))
         self.sp_tol = QLineEdit(str(self.fcfg["speed_filter"].get("tolerance", 1)))
@@ -645,32 +645,33 @@ class DataSettingsDialog(QDialog):
         form.addRow("Target Speed (m/s):", self.sp_speed)
         form.addRow("Tolerance (m/s):", self.sp_tol)
 
-        # Colorbar toggle
-        self.color_cb = QCheckBox("Show Colorbar")
-        self.color_cb.setChecked(self.fcfg["show_colorbar"])
-        form.addRow(self.color_cb)
+        # # Colorbar toggle
+        # self.color_cb = QCheckBox("Show Colorbar")
+        # self.color_cb.setChecked(self.fcfg["show_colorbar"])
+        # form.addRow(self.color_cb)
 
-        # Background Map toggle
-        self.map_cb = QCheckBox("Show Background Map")
-        self.map_cb.setChecked(self.fcfg["show_backgroundmap"])
-        form.addRow(self.map_cb)
-        self.map_cb.setEnabled(False)
+        # # Background Map toggle
+        # self.map_cb = QCheckBox("Show Background Map")
+        # self.map_cb.setChecked(self.fcfg["show_backgroundmap"])
+        # form.addRow(self.map_cb)
+        # self.map_cb.setEnabled(False)
 
-        # area bound toggle
-        self.show_area_bound_cb = QCheckBox("Apply Area Bound")
-        self.show_area_bound_cb.setChecked(self.fcfg["show_area_bound"])
-        self.show_area_bound_cb.stateChanged.connect(self.update_area_bound_state)
-        form.addRow(self.show_area_bound_cb)
+        # # area bound toggle
+        # self.show_area_bound_cb = QCheckBox("Apply Area Bound")
+        # self.show_area_bound_cb.setChecked(self.fcfg["show_area_bound"])
+        # self.show_area_bound_cb.stateChanged.connect(self.update_area_bound_state)
+        # form.addRow(self.show_area_bound_cb)
 
-        self.load_bound_btn = QPushButton("Load Boundary Data")
-        self.load_bound_btn.clicked.connect(self.load_bound_data)
-        form.addRow(self.load_bound_btn)
+        # self.load_bound_btn = QPushButton("Load Boundary Data")
+        # self.load_bound_btn.clicked.connect(self.load_bound_data)
+        # form.addRow(self.load_bound_btn)
 
         self.area_bound_cb = QCheckBox("Enable Area Bound")
         self.area_bound_cb.setChecked(self.fcfg["enable_area_bound"])
         form.addRow(self.area_bound_cb)
 
-        self.update_area_bound_state(self.show_area_bound_cb.checkState())
+        # self.update_area_bound_state(self.show_area_bound_cb.checkState())
+        
         # OK Button
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok)
         buttons.accepted.connect(self.accept)
@@ -704,9 +705,9 @@ class DataSettingsDialog(QDialog):
         self.fcfg["continuity_filter"]["enabled"] = self.cont_cb.isChecked()
         self.fcfg["continuity_filter"]["num_points"] = int(self.cont_num.text())
         self.fcfg["enable_area_bound"] = self.area_bound_cb.isChecked()
-        self.fcfg["show_area_bound"] = self.show_area_bound_cb.isChecked()
-        self.fcfg["show_colorbar"] = self.color_cb.isChecked()
-        self.fcfg["show_backgroundmap"] = self.map_cb.isChecked()
+        # self.fcfg["show_area_bound"] = self.show_area_bound_cb.isChecked()
+        # self.fcfg["show_colorbar"] = self.color_cb.isChecked()
+        # self.fcfg["show_backgroundmap"] = self.map_cb.isChecked()
 
         if self.fcfg["enable_area_bound"]:
             self.MainWindow.polygonDrawer.enable(True)

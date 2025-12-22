@@ -1,6 +1,7 @@
 import os
 from io import StringIO
-
+import math
+from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -13,8 +14,6 @@ from PySide6.QtWidgets import (
     QApplication,
     QMenu,
     QListWidget,
-    QButtonGroup,
-    QCheckBox,
     QFileDialog,
     QFrame,
     QGridLayout,
@@ -29,6 +28,8 @@ from PySide6.QtWidgets import (
     QToolBar,
     QVBoxLayout,
     QWidget,
+    QCheckBox,
+    QButtonGroup,
 )
 
 from mySettings import config
@@ -172,6 +173,13 @@ class CalibrationFlightWidget(QWidget):
             QMessageBox.warning(self, "ERROR", "Open a project folder first.")
             return
         path = os.path.join(project_path, "Calibration Flight Folder")
+        if not os.path.isdir(path):
+            QMessageBox.warning(
+                self,
+                "Folder Missing",
+                f'"Calibration Flight Folder" not found under:\n{project_path}',
+            )
+            return
         files, _ = QFileDialog.getOpenFileNames(
             parent=self,
             caption="Select Mag data files",
@@ -251,45 +259,46 @@ class CalibrationFlightWidget(QWidget):
         )
         grid.addWidget(QLabel("Value"), 0, 1, alignment=Qt.AlignmentFlag.AlignCenter)
         grid.addWidget(
-            QLabel("Reference"), 0, 2, alignment=Qt.AlignmentFlag.AlignCenter
+            QLabel("Main Direction"), 0, 2, alignment=Qt.AlignmentFlag.AlignCenter
         )
 
-        # Row 1
-        self.ew_input = QLineEdit()
-        self.cb_ew = QCheckBox()
-        grid.addWidget(QLabel("E → W"), 1, 0, alignment=Qt.AlignmentFlag.AlignCenter)
-        grid.addWidget(self.ew_input, 1, 1)
-        grid.addWidget(self.cb_ew, 1, 2, alignment=Qt.AlignmentFlag.AlignCenter)
+        # Row 1 (vertical up/down)
+        # Row 1 (vertical up/down) + shared main selector for vertical pair
+        self.TD_input = QLineEdit()
+        self.main_dir_group = QButtonGroup(box)
+        self.main_dir_group.setExclusive(True)
 
-        # Row 2
-        self.we_input = QLineEdit()
-        self.cb_we = QCheckBox()
-        grid.addWidget(QLabel("W → E"), 2, 0, alignment=Qt.AlignmentFlag.AlignCenter)
-        grid.addWidget(self.we_input, 2, 1)
-        grid.addWidget(self.cb_we, 2, 2, alignment=Qt.AlignmentFlag.AlignCenter)
+        self.cb_vertical_main = QCheckBox()
+        self.cb_vertical_main.setToolTip("Checked: Top → Down is main. Unchecked: Bottom → Up is main.")
+        self.main_dir_group.addButton(self.cb_vertical_main)
+        grid.addWidget(QLabel("Top → Down"), 1, 0, alignment=Qt.AlignmentFlag.AlignCenter)
+        grid.addWidget(self.TD_input, 1, 1)
+        grid.addWidget(self.cb_vertical_main, 1, 2, 2, 1, alignment=Qt.AlignmentFlag.AlignCenter)
 
-        # Row 3
-        self.ns_input = QLineEdit()
-        self.cb_ns = QCheckBox()
-        grid.addWidget(QLabel("N → S"), 3, 0, alignment=Qt.AlignmentFlag.AlignCenter)
-        grid.addWidget(self.ns_input, 3, 1)
-        grid.addWidget(self.cb_ns, 3, 2, alignment=Qt.AlignmentFlag.AlignCenter)
+        # Row 2 (vertical counterpart)
+        self.BU_input = QLineEdit()
+        grid.addWidget(QLabel("Bottom → Up"), 2, 0, alignment=Qt.AlignmentFlag.AlignCenter)
+        grid.addWidget(self.BU_input, 2, 1)
 
-        # Row 4
-        self.sn_input = QLineEdit()
-        self.cb_sn = QCheckBox()
-        grid.addWidget(QLabel("S → N"), 4, 0, alignment=Qt.AlignmentFlag.AlignCenter)
-        grid.addWidget(self.sn_input, 4, 1)
-        grid.addWidget(self.cb_sn, 4, 2, alignment=Qt.AlignmentFlag.AlignCenter)
+        # Row 3 (horizontal left/right) + shared main selector for horizontal pair
+        self.LR_input = QLineEdit()
+        self.cb_horizontal_main = QCheckBox()
+        self.cb_horizontal_main.setToolTip("Checked: Left → Right is main. Unchecked: Right → Left is main.")
+        self.main_dir_group.addButton(self.cb_horizontal_main)
+        grid.addWidget(QLabel("Left → Right"), 3, 0, alignment=Qt.AlignmentFlag.AlignCenter)
+        grid.addWidget(self.LR_input, 3, 1)
+        grid.addWidget(self.cb_horizontal_main, 3, 2, 2, 1, alignment=Qt.AlignmentFlag.AlignCenter)
+
+        # Row 4 (horizontal counterpart)
+        self.RL_input = QLineEdit()
+        grid.addWidget(QLabel("Right → Left"), 4, 0, alignment=Qt.AlignmentFlag.AlignCenter)
+        grid.addWidget(self.RL_input, 4, 1)
 
         vbox.addLayout(grid)
 
-        # — Enforce single-selection among the four checkboxes —
-        btn_group = QButtonGroup(box)
-        for cb in (self.cb_ew, self.cb_we, self.cb_ns, self.cb_sn):
-            btn_group.addButton(cb)
-        btn_group.setExclusive(True)
-        self.cb_ew.setChecked(True)  # Set the first checkbox as default
+        # Default reference direction: vertical (Top → Down). Only one can be checked.
+        self.cb_vertical_main.setChecked(True)
+        self.cb_horizontal_main.setChecked(False)
 
         vbox.addStretch()
         # — Save button —
@@ -355,14 +364,14 @@ class CalibrationFlightWidget(QWidget):
     def cancelCalibrationFlightData(self):
         self._selected_lines.clear()
         self._sel_positions.clear()
-        self.ew_input.setText("")
-        self.we_input.setText("")
-        self.ns_input.setText("")
-        self.sn_input.setText("")
-        self._set_input_color(self.ew_input, None)
-        self._set_input_color(self.we_input, None)
-        self._set_input_color(self.ns_input, None)
-        self._set_input_color(self.sn_input, None)
+        self.TD_input.setText("")
+        self.BU_input.setText("")
+        self.LR_input.setText("")
+        self.RL_input.setText("")
+        self._set_input_color(self.TD_input, None)
+        self._set_input_color(self.BU_input, None)
+        self._set_input_color(self.LR_input, None)
+        self._set_input_color(self.RL_input, None)
         self.update_plots(self.df)
 
     def applyCalibrationFlightData(self):
@@ -375,51 +384,51 @@ class CalibrationFlightWidget(QWidget):
             )
             return
 
-        # 각 방향별 평균 자기장 값을 저장할 딕셔너리
-        directional_mags = {"E_W": [], "W_E": [], "N_S": [], "S_N": []}
-        direction_colors = {"E_W": [], "W_E": [], "N_S": [], "S_N": []}
+        # 각 방향별 평균 자기장 값을 저장할 딕셔너리 (Top-Down / Bottom-Up / Left-Right / Right-Left)
+        directional_mags = {"TD": [], "BU": [], "LR": [], "RL": []}
+        direction_colors = {"TD": [], "BU": [], "LR": [], "RL": []}
 
         for idx, line in enumerate(self._selected_lines):
             start, end = line
             segment_df = self.df.iloc[start : end + 1]
             color = self._palette[idx % len(self._palette)]
 
-            # mag의 평균값을 구하고 방향을 확인한후 그 값을 ew_input등에 방향에 맞추어 넣는다
+            # mag의 평균값을 구하고 방향을 확인한후 그 값을 TD_input등에 방향에 맞추어 넣는다
             avg_mag = segment_df["Mag"].mean()
 
-            # 방향을 확인
+            # 방향을 확인 (북을 기준으로 한 각도와 비교)
             start_x, end_x = segment_df["X"].iloc[0], segment_df["X"].iloc[-1]
             start_y, end_y = segment_df["Y"].iloc[0], segment_df["Y"].iloc[-1]
 
             dx = end_x - start_x
             dy = end_y - start_y
 
-            direction = None
-            # X축(동서) 변화가 Y축(남북) 변화보다 클 경우
-            if abs(dx) > abs(dy):
-                if dx > 0:
-                    direction = "W_E"  # West to East
-                else:
-                    direction = "E_W"  # East to West
-            # Y축(남북) 변화가 더 클 경우
-            else:
-                if dy > 0:
-                    direction = "S_N"  # South to North
-                else:
-                    direction = "N_S"  # North to South
+            # heading_deg: 북을 0°, 시계방향 증가 (atan2(dx, dy) 사용)
+            heading_deg = (math.degrees(math.atan2(dx, dy)) + 360) % 360
+            main_deg = getattr(self, "_main_direction_degree", 0) or 0
+            diff = (heading_deg - main_deg + 360) % 360
 
-            if direction:
-                directional_mags[direction].append(avg_mag)
-                direction_colors[direction].append(color)
-                logger.debug(
-                    f"Line ({start}-{end}) is {direction} with avg mag {avg_mag:.2f}"
-                )
+            # main 방향을 기준으로 4분면으로 분류
+            if diff <= 45 or diff > 315:
+                direction = "TD"  # along main direction
+            elif diff <= 135:
+                direction = "LR"  # 90° clockwise from main
+            elif diff <= 225:
+                direction = "BU"  # opposite to main
+            else:
+                direction = "RL"  # 270° from main (counter-clockwise)
+
+            directional_mags[direction].append(avg_mag)
+            direction_colors[direction].append(color)
+            logger.debug(
+                f"Line ({start}-{end}) heading {heading_deg:.1f}°, diff {diff:.1f}° -> {direction} with avg mag {avg_mag:.2f}"
+            )
 
         # 각 방향별로 계산된 평균값들을 다시 평균내어 입력 필드에 설정 + 색상 강조
-        self._apply_direction_result("E_W", self.ew_input, directional_mags, direction_colors)
-        self._apply_direction_result("W_E", self.we_input, directional_mags, direction_colors)
-        self._apply_direction_result("N_S", self.ns_input, directional_mags, direction_colors)
-        self._apply_direction_result("S_N", self.sn_input, directional_mags, direction_colors)
+        self._apply_direction_result("TD", self.TD_input, directional_mags, direction_colors)
+        self._apply_direction_result("BU", self.BU_input, directional_mags, direction_colors)
+        self._apply_direction_result("LR", self.LR_input, directional_mags, direction_colors)
+        self._apply_direction_result("RL", self.RL_input, directional_mags, direction_colors)
 
         QMessageBox.information(
             self,
@@ -433,13 +442,20 @@ class CalibrationFlightWidget(QWidget):
         self.update_plots(self.df)
 
     def saveCalibrationFlightData(self):
+        project_path = config.get("project_path")
+        if not project_path:
+            QMessageBox.warning(
+                self, "Project Path Missing", "Open a project folder before saving."
+            )
+            return
+    
         # 레퍼런스용 check 박스를 확인하고 그값을 기준으로 차이를 저장
         try:
             values = {
-                "E_W": float(self.ew_input.text()),
-                "W_E": float(self.we_input.text()),
-                "N_S": float(self.ns_input.text()),
-                "S_N": float(self.sn_input.text()),
+                "TD": float(self.TD_input.text()),
+                "BU": float(self.BU_input.text()),
+                "LR": float(self.LR_input.text()),
+                "RL": float(self.RL_input.text()),
             }
         except ValueError:
             QMessageBox.warning(
@@ -447,49 +463,41 @@ class CalibrationFlightWidget(QWidget):
             )
             return
 
-        # Find the reference value from the checked checkbox
-        reference_direction = None
-        if self.cb_ew.isChecked():
-            reference_direction = "E_W"
-        elif self.cb_we.isChecked():
-            reference_direction = "W_E"
-        elif self.cb_ns.isChecked():
-            reference_direction = "N_S"
-        elif self.cb_sn.isChecked():
-            reference_direction = "S_N"
+        # Choose main directions per axis (two selectors)
+        if self.cb_vertical_main.isChecked():
+            reference = "TD" 
+        else:
+            reference = "LR"
 
-        if not reference_direction:
-            QMessageBox.warning(
-                self,
-                "Reference Not Set",
-                "Please select a reference direction by checking one of the boxes.",
-            )
-            return
-
-        reference_value = values[reference_direction]
-
-        # Calculate differences and store them
+        reference_value = values[reference]
+        
+        # Calculate differences and store them (use axis-specific mains)
         offsets = {
-            "offset_E_W": reference_value - values["E_W"],
-            "offset_W_E": reference_value - values["W_E"],
-            "offset_N_S": reference_value - values["N_S"],
-            "offset_S_N": reference_value - values["S_N"],
+            "offset_TD": reference_value - values["TD"],
+            "offset_BU": reference_value - values["BU"],
+            "offset_LR": reference_value - values["LR"],
+            "offset_RL": reference_value - values["RL"],
         }
+
+        # Persist current widget state
+        self.save_state_to_config()
 
         QMessageBox.information(
             self,
             "Saved",
-            f"Calibration offsets saved with reference '{reference_direction}'.",
+            "Calibration offsets saved.\n"            
         )
 
         # --- Save to file ---
-        file_path = os.path.join(config.get("project_path"), "calibration.txt")
+        file_path = os.path.join(project_path, "calibration.txt")
         try:
             with open(file_path, "w", encoding="utf-8") as f:
-                f.write(f"EW {offsets['offset_E_W']:.2f}\n")
-                f.write(f"WE {offsets['offset_W_E']:.2f}\n")
-                f.write(f"NS {offsets['offset_N_S']:.2f}\n")
-                f.write(f"SN {offsets['offset_S_N']:.2f}\n")
+                # New labels (aligned with UI)
+                f.write(f"TD {offsets['offset_TD']:.2f}\n")
+                f.write(f"BU {offsets['offset_BU']:.2f}\n")
+                f.write(f"LR {offsets['offset_LR']:.2f}\n")
+                f.write(f"RL {offsets['offset_RL']:.2f}\n")
+
             logger.info(f"Calibration data saved to {file_path}")
         except IOError as e:
             logger.error(f"Failed to save calibration file: {e}")
@@ -737,8 +745,90 @@ class CalibrationFlightWidget(QWidget):
 
     @Slot(str)
     def on_project_opened(self, project_path: str):
-        pass
+        logger.debug(f"CalibrationFlightWidget: Project opened at {project_path}")
+        self._main_direiion_str = config.get('direction_str', '')
+        self._main_direction_degree = config.get("direction", 0)
+        self.load_state_from_config()
 
     @Slot()
     def on_project_reset(self):
-        pass
+        self.TD_input.clear()
+        self.BU_input.clear()
+        self.LR_input.clear()
+        self.RL_input.clear()
+        self.cb_vertical_main.setChecked(True)
+        self.cb_horizontal_main.setChecked(False)
+        self._selected_files.clear()
+        self.updateFileList(self._selected_files)
+        self.df = pd.DataFrame()
+
+        # Clear all plots
+        if hasattr(self, "scatter_ax"):
+            self.scatter_ax.clear()
+            self.scatter_ax.set_title("No data loaded.")
+            if hasattr(self, "scatter_canvas"):
+                self.scatter_canvas.draw_idle()
+        if hasattr(self, "ax_mag"):
+            self.ax_mag.clear()
+        if hasattr(self, "ax_speed"):
+            self.ax_speed.clear()
+        if hasattr(self, "canvas"):
+            self.canvas.draw_idle()
+
+        self.save_state_to_config()
+
+    def save_state_to_config(self):
+        """Save current calibration widget state to project config."""
+        logger.debug("Saving calibration widget state to config")
+        if config.file_path is None:
+            return
+        # Reload existing config from disk if in-memory store is empty to avoid overwriting other keys.
+        if not config.config:
+            try:
+                config.load()
+            except Exception as e:
+                logger.warning(f"Failed to reload config before saving calibration state: {e}")
+        # file_names = [Path(p).name for p in self._selected_files] if getattr(self, "_selected_files", None) else []
+        state = {
+            "FileList": self._selected_files,
+            "TD": self.TD_input.text(),
+            "BU": self.BU_input.text(),
+            "LR": self.LR_input.text(),
+            "RL": self.RL_input.text(),
+            "vertical_main": self.cb_vertical_main.isChecked(),
+            "horizontal_main": self.cb_horizontal_main.isChecked(),
+        }
+        try:
+            config.set("calibration_widget", state, save=True)
+        except Exception as e:
+            logger.warning(f"Failed to save calibration widget state: {e}")
+
+    def load_state_from_config(self):
+        """Restore calibration widget state from project config."""
+        state = config.get("calibration_widget", {}) or {}
+        self._selected_files = state.get("FileList", [])
+        self.TD_input.setText(str(state.get("TD", "")))
+        self.BU_input.setText(str(state.get("BU", "")))
+        self.LR_input.setText(str(state.get("LR", "")))
+        self.RL_input.setText(str(state.get("RL", "")))
+
+        vert = state.get("vertical_main")
+        horiz = state.get("horizontal_main")
+        if vert is None and horiz is None:
+            self.cb_vertical_main.setChecked(True)
+            self.cb_horizontal_main.setChecked(False)
+        else:
+            if bool(vert) and not bool(horiz):
+                self.cb_vertical_main.setChecked(True)
+                self.cb_horizontal_main.setChecked(False)
+            elif bool(horiz) and not bool(vert):
+                self.cb_vertical_main.setChecked(False)
+                self.cb_horizontal_main.setChecked(True)
+            else:
+                self.cb_vertical_main.setChecked(True)
+                self.cb_horizontal_main.setChecked(False)
+        
+        self.updateFileList(self._selected_files)
+        if self._selected_files:
+            self.df = self.db.merge_CSVtodf(self._selected_files)
+            self.update_plots(self.df)
