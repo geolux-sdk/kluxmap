@@ -1,5 +1,4 @@
 import os
-from io import StringIO
 import math
 from pathlib import Path
 import matplotlib.pyplot as plt
@@ -9,7 +8,7 @@ from loguru import logger
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
 from PySide6.QtCore import Qt, Slot
-from PySide6.QtGui import QAction
+from PySide6.QtGui import QAction, QIcon
 from PySide6.QtWidgets import (
     QApplication,
     QMenu,
@@ -32,6 +31,7 @@ from PySide6.QtWidgets import (
     QButtonGroup,
 )
 
+from myResource import resource_path
 from mySettings import config
 
 
@@ -57,7 +57,7 @@ class CalibrationFlightWidget(QWidget):
         # Toolbar
         toolbar = QToolBar(self)
         self.actionOpenCaliFolder = QAction(
-            self.style().standardIcon(QStyle.StandardPixmap.SP_DirIcon),
+            QIcon(resource_path("imag_data_import.png")),
             "Open Calibration Flight Folder..",
             self,
         )
@@ -65,14 +65,6 @@ class CalibrationFlightWidget(QWidget):
         self.actionOpenCaliFolder.triggered.connect(self.openCalibrationFlightFolder)
         toolbar.addAction(self.actionOpenCaliFolder)
 
-        self.actionImportCaliFile = QAction(
-            self.style().standardIcon(QStyle.StandardPixmap.SP_FileIcon),
-            "Open Calibration Flight Folder..",
-            self,
-        )
-        self.actionImportCaliFile.setStatusTip("file Calibration Flight File")
-        self.actionImportCaliFile.triggered.connect(self.importCaliFile)
-        toolbar.addAction(self.actionImportCaliFile)
         layout.addWidget(toolbar)
 
         # Main plot widget
@@ -108,63 +100,9 @@ class CalibrationFlightWidget(QWidget):
         self.setLayout(layout)
 
         self.actionOpenCaliFolder.setEnabled(False)
-        self.actionImportCaliFile.setEnabled(False)
 
     def actionEnable(self, action=True):
         self.actionOpenCaliFolder.setEnabled(action)
-        self.actionImportCaliFile.setEnabled(action)
-
-    def importCaliFile(self):
-        logger.debug("importCaliFile")
-
-        # 1) 파일 다이얼로그로 CSV 파일 선택
-        file_path, _ = QFileDialog.getOpenFileName(
-            self,
-            "Select CSV File to Import",
-            "",  # 기본 열릴 디렉터리 (빈 문자열이면 마지막 디렉터리)
-            "CSV Files (*.csv)",
-        )
-
-        # 사용자가 취소 클릭했으면 종료
-        if not file_path:
-            logger.debug("Import CSV file selection canceled")
-            return
-
-        # 2) 선택된 파일을 results 폴더에 복사
-        try:
-            try:
-                QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
-                rows_buf = StringIO()
-                with open(file_path, "r", encoding="utf-8", errors="replace") as fr:
-                    for line in fr:
-                        parts = line.rstrip("\n").split(",")
-                        kept = parts[:6]  # 앞 6개 필드만
-                        rows_buf.write(",".join(kept) + "\n")
-                rows_buf.seek(0)
-                df = pd.read_csv(rows_buf)
-                df = df[df["Time"].astype(str).str.endswith(".000")]
-
-                QApplication.restoreOverrideCursor()
-
-                logger.debug(f"Imported CSV from {file_path} (first 5 columns only)")
-            except Exception as e:
-                logger.error(f"Error importing and truncating CSV: {e}")
-                QMessageBox.critical(
-                    self, "Import Error", f"Failed to import and truncate CSV:\n{e}"
-                )
-                return
-            self.db.insert_data(df, "imported_cali_file")
-            self.df = self.db.get_dataframe("imported_cali_file")
-            # 3) 파일 목록 및 플롯 갱신
-            self.update_plots(self.df)
-
-        except Exception as e:
-            logger.error(f"Failed to import CSV file: {repr(e)}")
-            QMessageBox.critical(
-                self,
-                "Import Error",
-                f"An error occurred while importing the file:\n{repr(e)}",
-            )
 
     def openCalibrationFlightFolder(self):
         logger.debug("openCalibrationFlightFolder")
@@ -226,8 +164,8 @@ class CalibrationFlightWidget(QWidget):
         self.ax_speed.set_title("Speed Plot")
         # … any default formatting for ax_speed …
 
-        # Reduce side margins so plots fill the horizontal space better
-        self.fig.subplots_adjust(left=0.07, right=0.98)
+        # Leave a bit more room on the left so y-axis labels don't get clipped
+        # self.fig.subplots_adjust(left=0.12, right=0.98)
 
         # Create the canvas and return it
         self.canvas = FigureCanvas(self.fig)
@@ -410,11 +348,11 @@ class CalibrationFlightWidget(QWidget):
 
             # main 방향을 기준으로 4분면으로 분류
             if diff <= 45 or diff > 315:
-                direction = "TD"  # along main direction
+                direction = "BU"  # along main direction
             elif diff <= 135:
                 direction = "LR"  # 90° clockwise from main
             elif diff <= 225:
-                direction = "BU"  # opposite to main
+                direction = "TD"  # opposite to main
             else:
                 direction = "RL"  # 270° from main (counter-clockwise)
 
@@ -515,6 +453,16 @@ class CalibrationFlightWidget(QWidget):
         self._temp_line = None
 
         # --- Scatter Plot 업데이트 ---
+        # X, Y가 있으면 누적 이동거리(m)를 계산해 x축으로 사용
+        distance = None
+        step_dist = None
+        if {"X", "Y"}.issubset(df.columns):
+            dx = df["X"].diff()
+            dy = df["Y"].diff()
+            step_dist = np.sqrt(dx**2 + dy**2)
+            distance = step_dist.cumsum().fillna(0)
+            df["Distance"] = distance
+
         self.scatter_ax.clear()
         if {"X", "Y", "Mag"}.issubset(df.columns):
             x, y = df["X"], df["Y"]
@@ -571,10 +519,11 @@ class CalibrationFlightWidget(QWidget):
 
         # --- Mag Plot ---
         if "Mag" in df.columns:
-            self.ax_mag.plot(df.index, df["Mag"], label="Mag", linewidth=0.8)
+            x_axis = distance if distance is not None else df.index
+            self.ax_mag.plot(x_axis, df["Mag"], label="Mag", linewidth=0.8)
             self.ax_mag.set_title("Magnetic Field")
-            self.ax_mag.set_xlabel("Index")
-            self.ax_mag.set_ylabel("Mag Value")
+            self.ax_mag.set_xlabel("Distance (m)" if distance is not None else "Index")
+            self.ax_mag.set_ylabel("Total Magnetic Intensity (nT)")
             self.ax_mag.legend()
             self.ax_mag.grid(True)
         else:
@@ -584,18 +533,20 @@ class CalibrationFlightWidget(QWidget):
         speed_available = False
         if {"X", "Y", "Counter"}.issubset(df.columns):
             dt = df["Counter"].diff() / 1000.0  # ms to s
-            dx = df["X"].diff()
-            dy = df["Y"].diff()
-            dist = np.sqrt(dx**2 + dy**2)
-            speed = dist / dt.replace(0, np.nan)
+            if step_dist is None:
+                dx = df["X"].diff()
+                dy = df["Y"].diff()
+                step_dist = np.sqrt(dx**2 + dy**2)
+            speed = step_dist / dt.replace(0, np.nan)
             df["Speed"] = speed
             speed_available = True
 
+            x_axis = distance if distance is not None else df.index
             self.ax_speed.plot(
-                df.index, df["Speed"], label="Speed (m/s)", linewidth=0.8
+                x_axis, df["Speed"], label="Speed (m/s)", linewidth=0.8
             )
             self.ax_speed.set_title("Flight Speed")
-            self.ax_speed.set_xlabel("Index")
+            self.ax_speed.set_xlabel("Distance (m)" if distance is not None else "Index")
             self.ax_speed.set_ylabel("Speed (m/s)")
             self.ax_speed.legend()
             self.ax_speed.grid(True)
@@ -609,7 +560,11 @@ class CalibrationFlightWidget(QWidget):
             for i, line in enumerate(self._selected_lines):
                 start, end = line
                 color = palette[i % len(palette)]
-                idxs = df.index.values[start : end + 1]
+                idxs = (
+                    df["Distance"].values[start : end + 1]
+                    if distance is not None
+                    else df.index.values[start : end + 1]
+                )
 
                 if "Mag" in df.columns:
                     mags = df["Mag"].iloc[start : end + 1].values
@@ -619,7 +574,8 @@ class CalibrationFlightWidget(QWidget):
                     speeds = df["Speed"].iloc[start : end + 1].values
                     self.ax_speed.plot(idxs, speeds, linewidth=2, c=color, zorder=5)
 
-        self.fig.tight_layout()
+        # Keep extra left margin so y-labels stay visible
+        self.fig.tight_layout(rect=[0.05, 0.05, 0.98, 0.95], h_pad=2.0)
         self.canvas.draw()
 
     def _on_scatter_select(self, event):

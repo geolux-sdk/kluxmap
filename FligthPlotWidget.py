@@ -68,16 +68,16 @@ class FlightPlotWidget(QWidget):
         toolbar = QToolBar(self)
 
         self.actionOpenFileBrower = QAction(
-            self.style().standardIcon(QStyle.StandardPixmap.SP_DirIcon),
+            QIcon(resource_path("imag_data_import.png")),
             "&Open File Browser",
             self,
         )
         self.actionOpenFileBrower.setStatusTip("Open Project Browser")
 
         self.actionDataCutDisp = QAction(
-            QIcon(resource_path("filter.png")), "Trim Filters", self
+            QIcon(resource_path("imag_cut.png")), "Line Cut", self
         )
-        self.actionDataCutDisp.setStatusTip("Trim Filters Settings")
+        self.actionDataCutDisp.setStatusTip("Line Cut")
 
         self.actionDataConfiDisp = QAction(
             QIcon(resource_path("filter.png")), "Trim Filters", self
@@ -85,14 +85,14 @@ class FlightPlotWidget(QWidget):
         self.actionDataConfiDisp.setStatusTip("Trim Filters Settings")
 
         self.actionDataXXXDisp = QAction(
-            QIcon(resource_path("filter.png")), "Trim Filters", self
+            QIcon(resource_path("imag_sum.png")), "Line Append", self
         )
-        self.actionDataXXXDisp.setStatusTip("Trim Filters Settings")
+        self.actionDataXXXDisp.setStatusTip("Line Append")
 
         self.actionDataOut = QAction(
-            QIcon(resource_path("filter.png")), "Trim Filters", self
+            QIcon(resource_path("imag_kml_export.png")), "Export KML", self
         )
-        self.actionDataOut.setStatusTip("Trim Filters Settings")
+        self.actionDataOut.setStatusTip("Export KML FILE")
 
         toolbar.addAction(self.actionOpenFileBrower)
         toolbar.addAction(self.actionDataCutDisp)
