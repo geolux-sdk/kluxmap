@@ -29,7 +29,8 @@ from scipy.signal import butter, filtfilt
 
 from myResource import resource_path
 from mySettings import config
-from myWidgets import DataFilterDialog, KrigingPlotDialog_withHead
+from kriging_dialog import KrigingPlotDialog_withHead
+from myWidgets import DataFilterDialog
 
 
 class LinePlotWidget(QWidget):

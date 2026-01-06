@@ -74,13 +74,31 @@ class FlightPlotWidget(QWidget):
         )
         self.actionOpenFileBrower.setStatusTip("Open Project Browser")
 
+        self.actionDataCutDisp = QAction(
+            QIcon(resource_path("filter.png")), "Trim Filters", self
+        )
+        self.actionDataCutDisp.setStatusTip("Trim Filters Settings")
+
         self.actionDataConfiDisp = QAction(
             QIcon(resource_path("filter.png")), "Trim Filters", self
         )
         self.actionDataConfiDisp.setStatusTip("Trim Filters Settings")
 
+        self.actionDataXXXDisp = QAction(
+            QIcon(resource_path("filter.png")), "Trim Filters", self
+        )
+        self.actionDataXXXDisp.setStatusTip("Trim Filters Settings")
+
+        self.actionDataOut = QAction(
+            QIcon(resource_path("filter.png")), "Trim Filters", self
+        )
+        self.actionDataOut.setStatusTip("Trim Filters Settings")
+
         toolbar.addAction(self.actionOpenFileBrower)
+        toolbar.addAction(self.actionDataCutDisp)
         toolbar.addAction(self.actionDataConfiDisp)
+        toolbar.addAction(self.actionDataXXXDisp)
+        toolbar.addAction(self.actionDataOut)
 
         # 레이아웃에 툴바와 실제 콘텐츠(MainWidget)를 추가
         layout.addWidget(toolbar)
@@ -122,7 +140,10 @@ class FlightPlotWidget(QWidget):
 
         # 초기 비활성화
         self.actionOpenFileBrower.setEnabled(False)
+        self.actionDataCutDisp.setEnabled(False)
         self.actionDataConfiDisp.setEnabled(False)
+        self.actionDataXXXDisp.setEnabled(False)
+        self.actionDataOut.setEnabled(False)
 
         self.connectSingnal()
 
@@ -134,8 +155,11 @@ class FlightPlotWidget(QWidget):
 
     def actionEnable(self, action=True):
         self.actionOpenFileBrower.setEnabled(action)
+        self.actionDataCutDisp.setEnabled(action)   
         self.actionDataConfiDisp.setEnabled(action)
-
+        self.actionDataXXXDisp.setEnabled(action)
+        self.actionDataOut.setEnabled(action)
+        
     def createProjectLabel(self):
         # "프로젝트:" 텍스트를 위한 QLabel
         lbl_project_text = QLabel("Project:")
