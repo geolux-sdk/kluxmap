@@ -1,3 +1,4 @@
+import json
 import shutil
 from pathlib import Path
 
@@ -5,10 +6,17 @@ from loguru import logger
 from PySide6.QtCore import Qt, Signal, QSettings, QByteArray
 from PySide6.QtGui import QAction, QIcon
 from PySide6.QtWidgets import (
+    QDialog,
     QFileDialog,
     QMainWindow,
     QMessageBox,
+    QPushButton,
     QTabWidget,
+    QVBoxLayout,
+    QLabel,
+    QTreeWidget,
+    QTreeWidgetItem,
+    QHeaderView,
 )
 
 from CalibrationFlightWidget import CalibrationFlightWidget
@@ -144,6 +152,10 @@ class KLuxMap(QMainWindow):
 
         help_menu = menu_bar.addMenu("Help")
 
+        self.settings_action = QAction(QIcon(), "Settings", self)
+        self.settings_action.setStatusTip("Show current project settings")
+        help_menu.addAction(self.settings_action)
+
         self.about_action = QAction(QIcon(), "About", self)
         self.about_action.setStatusTip("Show information about this application")
         help_menu.addAction(self.about_action)
@@ -167,6 +179,7 @@ class KLuxMap(QMainWindow):
         self.config_action.triggered.connect(
             lambda checked=False: ConfigDataSettingsDialog(self).exec()
         )
+        self.settings_action.triggered.connect(self.showProjectSettingsDialog)
         self.about_action.triggered.connect(self.showAboutDialog)
 
         for w in (self.FligtPlotWidget, self.CalibPlotWidget, self.LinePlotWidget):
@@ -179,6 +192,88 @@ class KLuxMap(QMainWindow):
             "About",
             "This is the KLuxMap application \nfor magnetic data viewing, \ndeveloped by KIGAM and GEOLUX.",
         )
+
+    def showProjectSettingsDialog(self):
+        settings_path = config.file_path
+        if not settings_path:
+            QMessageBox.information(self, "Settings", "No project is open.")
+            return
+
+        try:
+            with settings_path.open("r", encoding="utf-8") as file:
+                settings_data = json.load(file)
+        except FileNotFoundError:
+            QMessageBox.warning(
+                self,
+                "Settings",
+                f"Settings file not found:\n{settings_path}",
+            )
+            return
+        except json.JSONDecodeError as e:
+            QMessageBox.critical(
+                self,
+                "Settings",
+                f"Invalid settings JSON.\nError: {e}",
+            )
+            return
+        except Exception as e:
+            QMessageBox.critical(
+                self,
+                "Settings",
+                f"Failed to load settings.\nError: {e}",
+            )
+            return
+
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Project Settings")
+        dlg.resize(700, 500)
+
+        layout = QVBoxLayout(dlg)
+        path_label = QLabel(str(settings_path), dlg)
+        layout.addWidget(path_label)
+
+        tree = QTreeWidget(dlg)
+        tree.setHeaderLabels(["Key", "Value"])
+        tree.setAlternatingRowColors(True)
+        tree.header().setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        tree.header().setStretchLastSection(True)
+        layout.addWidget(tree)
+
+        def format_value(value):
+            if value is None:
+                return "null"
+            if isinstance(value, bool):
+                return "true" if value else "false"
+            return str(value)
+
+        def add_item(parent, key, value):
+            if isinstance(value, dict):
+                item = QTreeWidgetItem(parent, [str(key), ""])
+                for sub_key, sub_value in value.items():
+                    add_item(item, sub_key, sub_value)
+            elif isinstance(value, list):
+                item = QTreeWidgetItem(parent, [str(key), f"[{len(value)}]"])
+                for index, sub_value in enumerate(value):
+                    add_item(item, f"[{index}]", sub_value)
+            else:
+                QTreeWidgetItem(parent, [str(key), format_value(value)])
+
+        if isinstance(settings_data, dict):
+            for key, value in settings_data.items():
+                add_item(tree, key, value)
+        elif isinstance(settings_data, list):
+            for index, value in enumerate(settings_data):
+                add_item(tree, f"[{index}]", value)
+        else:
+            add_item(tree, "value", settings_data)
+
+        tree.expandToDepth(1)
+
+        close_btn = QPushButton("Close", dlg)
+        close_btn.clicked.connect(dlg.accept)
+        layout.addWidget(close_btn, alignment=Qt.AlignRight)
+
+        dlg.exec()
 
     def menu_action_enable(self, action=True):
         self.closeProject_action.setEnabled(action)
