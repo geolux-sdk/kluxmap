@@ -120,6 +120,10 @@ class KLuxMap(QMainWindow):
         self.openProject_action.setStatusTip("Open a project folder")
         project_menu.addAction(self.openProject_action)
 
+        self.recentProject_action = QAction("Recent Project", self)
+        self.recentProject_action.setStatusTip("Open the most recent project")
+        project_menu.addAction(self.recentProject_action)
+
         self.resetProject_action = QAction("&Reset Project Folder", self)
         self.resetProject_action.setShortcut("Ctrl+R")
         self.resetProject_action.setStatusTip("Reset Data in project folder")
@@ -165,12 +169,14 @@ class KLuxMap(QMainWindow):
         self.convert_action.setEnabled(False)
         self.import_SEC_files_action.setEnabled(False)
         self.config_action.setEnabled(False)
+        self._update_recent_project_action()
 
     def connectSignals(self):
         """모든 시그널을 슬롯에 연결"""
         self.tabs.currentChanged.connect(self.on_tab_changed)
         self.createProject_action.triggered.connect(self.createProjectFolder)
         self.openProject_action.triggered.connect(self.openProjectFolder)
+        self.recentProject_action.triggered.connect(self.openRecentProject)
         self.resetProject_action.triggered.connect(self.resetProjectFolder)
         self.closeProject_action.triggered.connect(self.closeProjectFolder)
         self.convert_action.triggered.connect(self.convertDataToCSV)
@@ -275,6 +281,11 @@ class KLuxMap(QMainWindow):
 
         dlg.exec()
 
+    def _update_recent_project_action(self):
+        last_folder = self.settings.value("projects/last", "", type=str)
+        enabled = bool(last_folder) and Path(last_folder).exists()
+        self.recentProject_action.setEnabled(enabled)
+
     def menu_action_enable(self, action=True):
         self.closeProject_action.setEnabled(action)
         self.resetProject_action.setEnabled(action)
@@ -285,9 +296,13 @@ class KLuxMap(QMainWindow):
         self.FligtPlotWidget.actionEnable(action)
         self.LinePlotWidget.actionEnable(action)
         self.CalibPlotWidget.actionEnable(action)
-        action = not action
-        self.createProject_action.setEnabled(action)
-        self.openProject_action.setEnabled(action)
+        can_open = not action
+        self.createProject_action.setEnabled(can_open)
+        self.openProject_action.setEnabled(can_open)
+        if can_open:
+            self._update_recent_project_action()
+        else:
+            self.recentProject_action.setEnabled(False)
 
     def closeProjectFolder(self):
         logger.debug("Event : closeProjectFolder")
@@ -322,6 +337,7 @@ class KLuxMap(QMainWindow):
         self.menu_action_enable(True)
         self.projectOpened.emit(folder_path)
         self.settings.setValue("projects/last", str(folder_path))
+        self._update_recent_project_action()
 
     def openProjectFolder(self):
         logger.debug("Event : openProjectFolder")
@@ -334,18 +350,47 @@ class KLuxMap(QMainWindow):
         )
         if folder_path:
             logger.debug(f"openProjectFolder {folder_path}")
+            self._open_project(folder_path)
 
-            config.set_path(Path(folder_path) / "project_settings.json")
-            config.load()
-            config.set("project_path", folder_path, save=True)
-            make_project_subfolder(".processed")
+    def openRecentProject(self):
+        logger.debug("Event : openRecentProject")
+        last_folder = self.settings.value("projects/last", "", type=str)
+        if not last_folder:
+            QMessageBox.information(
+                self,
+                "Recent Project",
+                "No recent project found.",
+            )
+            self._update_recent_project_action()
+            return
 
-            self.openProject_action.setEnabled(False)
-            self.createProject_action.setEnabled(False)
-            self.menu_action_enable()
+        last_path = Path(last_folder)
+        if not last_path.exists():
+            QMessageBox.warning(
+                self,
+                "Recent Project",
+                f"Recent project folder not found:\n{last_path}",
+            )
+            self._update_recent_project_action()
+            return
 
-            self.projectOpened.emit(folder_path)
-            self.settings.setValue("projects/last", str(folder_path))
+        logger.debug(f"openRecentProject {last_path}")
+        self._open_project(last_path)
+
+    def _open_project(self, folder_path: str | Path):
+        folder_path = Path(folder_path)
+        config.set_path(folder_path / "project_settings.json")
+        config.load()
+        config.set("project_path", str(folder_path), save=True)
+        make_project_subfolder(".processed")
+
+        self.openProject_action.setEnabled(False)
+        self.createProject_action.setEnabled(False)
+        self.menu_action_enable()
+
+        self.projectOpened.emit(str(folder_path))
+        self.settings.setValue("projects/last", str(folder_path))
+        self._update_recent_project_action()
 
     def resetProjectFolder(self):
         logger.debug("Event : resetProjectFolder")

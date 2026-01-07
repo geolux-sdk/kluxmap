@@ -16,6 +16,9 @@ from PySide6.QtWidgets import (
     QDialogButtonBox,
     QDial,
     QFileDialog,
+    QAbstractItemView,
+    QListView,
+    QTreeView,
     QFormLayout,
     QGridLayout,
     QGroupBox,
@@ -310,21 +313,21 @@ class DataSettingsDialog(QDialog):
         # form.addRow(self.map_cb)
         # self.map_cb.setEnabled(False)
 
-        # # area bound toggle
-        # self.show_area_bound_cb = QCheckBox("Apply Area Bound")
-        # self.show_area_bound_cb.setChecked(self.fcfg["show_area_bound"])
-        # self.show_area_bound_cb.stateChanged.connect(self.update_area_bound_state)
-        # form.addRow(self.show_area_bound_cb)
+        # area bound toggle
+        self.show_area_bound_cb = QCheckBox("Apply Area Bound")
+        self.show_area_bound_cb.setChecked(self.fcfg["show_area_bound"])
+        self.show_area_bound_cb.stateChanged.connect(self.update_area_bound_state)
+        form.addRow(self.show_area_bound_cb)
 
-        # self.load_bound_btn = QPushButton("Load Boundary Data")
-        # self.load_bound_btn.clicked.connect(self.load_bound_data)
-        # form.addRow(self.load_bound_btn)
+        self.load_bound_btn = QPushButton("Load Boundary Data")
+        self.load_bound_btn.clicked.connect(self.load_bound_data)
+        form.addRow(self.load_bound_btn)
 
         self.area_bound_cb = QCheckBox("Enable Area Bound")
         self.area_bound_cb.setChecked(self.fcfg["enable_area_bound"])
         form.addRow(self.area_bound_cb)
 
-        # self.update_area_bound_state(self.show_area_bound_cb.checkState())
+        self.update_area_bound_state(self.show_area_bound_cb.checkState())
         
         # OK Button
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok)
@@ -359,7 +362,7 @@ class DataSettingsDialog(QDialog):
         self.fcfg["continuity_filter"]["enabled"] = self.cont_cb.isChecked()
         self.fcfg["continuity_filter"]["num_points"] = int(self.cont_num.text())
         self.fcfg["enable_area_bound"] = self.area_bound_cb.isChecked()
-        # self.fcfg["show_area_bound"] = self.show_area_bound_cb.isChecked()
+        self.fcfg["show_area_bound"] = self.show_area_bound_cb.isChecked()
         # self.fcfg["show_colorbar"] = self.color_cb.isChecked()
         # self.fcfg["show_backgroundmap"] = self.map_cb.isChecked()
 
@@ -875,3 +878,32 @@ def browse_directory(
     except Exception as e:
         logger.error(f"browse_directory error: {e}")
         return ""
+
+
+def browse_multidirectiorys(
+    parent=None,
+    initial_dir: str = "",
+    caption: str = "Select Directories",
+) -> list[str]:
+    # Select multiple directories using a non-native QFileDialog.
+    start_dir = (
+        initial_dir if (initial_dir and os.path.exists(initial_dir)) else os.getcwd()
+    )
+    try:
+        dialog = QFileDialog(parent, caption, start_dir)
+        dialog.setOption(QFileDialog.DontUseNativeDialog, True)
+        dialog.setFileMode(QFileDialog.Directory)
+        dialog.setOption(QFileDialog.ShowDirsOnly, True)
+
+        for view in dialog.findChildren(QListView):
+            view.setSelectionMode(QAbstractItemView.ExtendedSelection)
+        for view in dialog.findChildren(QTreeView):
+            view.setSelectionMode(QAbstractItemView.ExtendedSelection)
+
+        if dialog.exec():
+            return dialog.selectedFiles()
+        return []
+    except Exception as e:
+        logger.error(f"browse_multidirectiorys error: {e}")
+        return []
+
