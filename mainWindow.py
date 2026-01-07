@@ -21,7 +21,7 @@ from PySide6.QtWidgets import (
 
 from CalibrationFlightWidget import CalibrationFlightWidget
 from DataManager import DataManager
-from FligthPlotWidget import FlightPlotWidget
+from FlightPlotWidget import FlightPlotWidget
 from LinePlotWidget import LinePlotWidget
 from myConvertDlg import (
     ConvertDataDialog,
