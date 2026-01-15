@@ -33,6 +33,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from DataManager import DataManager
 from myResource import resource_path
 from mySettings import config
 from myWidgets import ColorbarRangeDialog, DataSettingsDialog, OrthogonalPolygonDrawer
@@ -41,11 +42,13 @@ from segment_utils import subtract_intervals
 
 class FlightPlotWidget(QWidget):
 
-    def __init__(self, db, main_window=None):
+    def __init__(
+        self, db: DataManager, main_window: Optional[QWidget] = None
+    ) -> None:
         super().__init__()
-        self.main_window = main_window
-        
-        self.db = db
+        self.main_window: Optional[QWidget] = main_window
+
+        self.db: DataManager = db
 
         self._selected_lines = []
         self._linecut_point = None

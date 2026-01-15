@@ -1,6 +1,7 @@
 import os
 import math
 import shutil
+from typing import Optional
 
 import matplotlib.pyplot as plt
 import pandas as pd
@@ -28,7 +29,7 @@ from PySide6.QtWidgets import (
 )
 from scipy.signal import butter, filtfilt
 
-from DataManager import Source
+from DataManager import DataManager, Source
 
 from myResource import resource_path
 from mySettings import config
@@ -37,11 +38,13 @@ from myWidgets import DataFilterDialog
 
 
 class LinePlotWidget(QWidget):
-    def __init__(self, db, main_window=None):
+    def __init__(
+        self, db: DataManager, main_window: Optional[QWidget] = None
+    ) -> None:
         super().__init__()
        
-        self.db = db
-        self.main_window = main_window
+        self.db: DataManager = db
+        self.main_window: Optional[QWidget] = main_window
 
         self.selected_df = pd.DataFrame()
         self.scanline_df = {}

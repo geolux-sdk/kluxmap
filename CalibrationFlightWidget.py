@@ -1,6 +1,7 @@
 import os
 import math
 from pathlib import Path
+from typing import Optional
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -31,15 +32,18 @@ from PySide6.QtWidgets import (
     QButtonGroup,
 )
 
+from DataManager import DataManager
 from myResource import resource_path
 from mySettings import config
 
 
 class CalibrationFlightWidget(QWidget):
-    def __init__(self, db, main_window=None):
+    def __init__(
+        self, db: DataManager, main_window: Optional[QWidget] = None
+    ) -> None:
         super().__init__()
-        self.db = db
-        self.main_window = main_window
+        self.db: DataManager = db
+        self.main_window: Optional[QWidget] = main_window
 
         self.df = pd.DataFrame()
         # 선택한 두 지점을 기억할 리스트
