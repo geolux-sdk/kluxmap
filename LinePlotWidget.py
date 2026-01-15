@@ -1,4 +1,5 @@
 import os
+import math
 import shutil
 
 import matplotlib.pyplot as plt
@@ -27,6 +28,8 @@ from PySide6.QtWidgets import (
 )
 from scipy.signal import butter, filtfilt
 
+from DataManager import Source
+
 from myResource import resource_path
 from mySettings import config
 from kriging_dialog import KrigingPlotDialog_withHead
@@ -47,6 +50,12 @@ class LinePlotWidget(QWidget):
         self.plot_list = []
         self.selected_col_name = "Mag"
         self.calibration_data = {}
+        self._active_scanline_name = None
+        self._active_timeline_id = None
+        self._active_segment_id = None
+        self._segment_overlay = None
+        self._segment_counter = 0
+        self._line_select_start = None
 
         logger.debug("LinePlotWidget")
         self.initUI()
@@ -152,6 +161,8 @@ class LinePlotWidget(QWidget):
     def createCanvasPlot(self):
         self.fig, self.ax = plt.subplots(figsize=(12, 2), dpi=100)
         self.canvas = FigureCanvas(self.fig)
+        self.canvas.mpl_connect("button_press_event", self._on_lineplot_press)
+        self.canvas.mpl_connect("button_release_event", self._on_lineplot_release)
         return self.canvas
 
     def createFileList(self):
@@ -400,6 +411,7 @@ class LinePlotWidget(QWidget):
                     zorder=6,
                 )
         # 오프셋 모드 끄기 → 절대값 그대로 표시
+        self._apply_segment_overlay()
         self.scatter_ax.ticklabel_format(useOffset=False, style="plain", axis="x")
         self.scatter_ax.ticklabel_format(useOffset=False, style="plain", axis="y")
 
@@ -415,6 +427,11 @@ class LinePlotWidget(QWidget):
         name = item.text()
         df = self.scanline_df.get(name, pd.DataFrame())
         self.selected_df = df
+        self._active_scanline_name = name
+        self._active_timeline_id = None
+        self._active_segment_id = None
+        self._segment_overlay = None
+        self._line_select_start = None
         self.populate_table(df)
 
         col_index = df.columns.get_loc(self.selected_col_name)
@@ -474,6 +491,137 @@ class LinePlotWidget(QWidget):
         self.ax.grid(True)
         self.fig.tight_layout()
         self.canvas.draw()
+
+    def _on_lineplot_press(self, event):
+        if event.button != 1:
+            return
+        if event.inaxes != self.ax:
+            return
+        if self.selected_df.empty:
+            return
+        if event.xdata is None:
+            return
+        self._line_select_start = float(event.xdata)
+
+    def _on_lineplot_release(self, event):
+        if event.button != 1:
+            return
+        if self._line_select_start is None:
+            return
+        if event.inaxes != self.ax:
+            self._line_select_start = None
+            return
+        if event.xdata is None:
+            self._line_select_start = None
+            return
+        x0 = self._line_select_start
+        x1 = float(event.xdata)
+        self._line_select_start = None
+        g0, g1 = self._xrange_to_global_indices(x0, x1, len(self.selected_df))
+        if g0 is None:
+            return
+        try:
+            timeline_id = self._ensure_segment_timeline()
+            segment_id = f"{timeline_id}:seg{self._segment_counter}"
+            self._segment_counter += 1
+            self.db.create_segment_from_range(
+                segment_id,
+                timeline_id,
+                g0,
+                g1,
+                meta={"source": self._active_scanline_name},
+            )
+        except Exception as e:
+            logger.error(f"Failed to create segment: {e}")
+            return
+        self.set_segment(segment_id)
+
+    def _xrange_to_global_indices(self, x0: float, x1: float, length: int):
+        if length <= 0:
+            return None, None
+        start = min(x0, x1)
+        end = max(x0, x1)
+        g0 = int(math.floor(start))
+        g1 = int(math.floor(end)) + 1
+        if g0 < 0:
+            g0 = 0
+        if g1 > length:
+            g1 = length
+        if g0 >= g1:
+            return None, None
+        return g0, g1
+
+    def _ensure_segment_timeline(self) -> str:
+        if not self._active_scanline_name:
+            raise ValueError("No scanline selected.")
+        source_id = f"scanline:{self._active_scanline_name}"
+        timeline_id = f"scanline:{self._active_scanline_name}"
+        src_path = self.scanline_filepaths.get(self._active_scanline_name, "")
+        if self.selected_df.empty:
+            raise ValueError("Selected DataFrame is empty.")
+        # Store a snapshot to avoid in-place mutation.
+        self.db.sources[source_id] = Source(
+            source_id=source_id,
+            path=str(src_path),
+            df=self.selected_df.copy(),
+        )
+        self.db.create_timeline(timeline_id, [source_id])
+        self._active_timeline_id = timeline_id
+        return timeline_id
+
+    def set_segment(self, segment_id: str) -> None:
+        self._active_segment_id = segment_id
+        self._draw_segment_overlay(segment_id, draw=True)
+
+    def _draw_segment_overlay(self, segment_id: str, draw: bool) -> None:
+        if not hasattr(self, "scatter_ax") or self.scatter_ax is None:
+            return
+        if self._segment_overlay is not None:
+            try:
+                self._segment_overlay.remove()
+            except Exception:
+                pass
+            self._segment_overlay = None
+        if self.selected_df.empty:
+            return
+        if not {"X", "Y"}.issubset(self.selected_df.columns):
+            logger.warning("Segment overlay skipped: missing X/Y.")
+            return
+        c_col = None
+        if self.selected_col_name in self.selected_df.columns:
+            c_col = self.selected_col_name
+        elif "Mag" in self.selected_df.columns:
+            c_col = "Mag"
+
+        try:
+            if c_col is None:
+                x_arr, y_arr = self.db.get_scatter_arrays(
+                    segment_id, "X", "Y", None, stride=1
+                )
+            else:
+                x_arr, y_arr, _ = self.db.get_scatter_arrays(
+                    segment_id, "X", "Y", c_col, stride=1
+                )
+        except Exception as e:
+            logger.error(f"Segment overlay failed: {e}")
+            return
+
+        if len(x_arr) == 0:
+            return
+        self._segment_overlay = self.scatter_ax.scatter(
+            x_arr,
+            y_arr,
+            s=12,
+            color="orange",
+            alpha=0.9,
+            zorder=7,
+        )
+        if draw:
+            self.scatter_canvas.draw_idle()
+
+    def _apply_segment_overlay(self) -> None:
+        if self._active_segment_id:
+            self._draw_segment_overlay(self._active_segment_id, draw=False)
 
     def show_file_list_context_menu(self, position):
         item = self.fileListWidget.itemAt(position)

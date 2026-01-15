@@ -1,5 +1,8 @@
 import os
+from bisect import bisect_right
+from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 import geopandas as gpd
 import numpy as np
@@ -8,23 +11,94 @@ from loguru import logger
 from shapely.geometry import Point, Polygon
 
 from mySettings import config
+from segment_utils import normalize_intervals
+
+
+@dataclass
+class Source:
+    source_id: str
+    path: str
+    df: pd.DataFrame  # Treat as immutable; do not mutate in place.
+
+
+@dataclass
+class Timeline:
+    timeline_id: str
+    source_ids: list[str]
+    offsets: list[int] = field(default_factory=list)
+    length: int = 0
+
+    def build_offsets(self, sources: dict[str, "Source"]) -> None:
+        offsets: list[int] = []
+        total = 0
+        for source_id in self.source_ids:
+            src = sources.get(source_id)
+            if src is None:
+                raise KeyError(f"Unknown source_id: {source_id}")
+            offsets.append(total)
+            total += len(src.df)
+        self.offsets = offsets
+        self.length = total
+
+    def global_to_local(self, gidx: int) -> tuple[str, int]:
+        if not self.offsets:
+            raise ValueError("Offsets not built. Call build_offsets() first.")
+        if gidx < 0 or gidx >= self.length:
+            raise IndexError(f"Global index out of range: {gidx}")
+        pos = bisect_right(self.offsets, gidx) - 1
+        if pos < 0 or pos >= len(self.source_ids):
+            raise IndexError(f"Global index out of range: {gidx}")
+        local_idx = gidx - self.offsets[pos]
+        return self.source_ids[pos], local_idx
+
+
+@dataclass
+class Segment:
+    segment_id: str
+    timeline_id: str
+    intervals: list[tuple[int, int]] = field(default_factory=list)
+    meta: dict[str, Any] = field(default_factory=dict)
 
 
 class DataManager:
-    def __init__(self):    
+    def __init__(self):
+        self.sources: dict[str, Source] = {}
+        self.timelines: dict[str, Timeline] = {}
+        self.segments: dict[str, Segment] = {}
+        self.active_timeline_id: str | None = None
+        self.active_segment_ids: list[str] = []
+        self.fileDataBase: dict[str, pd.DataFrame] = {}
+        # DEPRECATED: legacy combined dataframe path.
         self.combined_df = pd.DataFrame()
+        # Per-file scanline state from FlightPlot.
+        self.scanline_df_by_file: dict[str, pd.DataFrame] = {}
+        self.scanline_groups_by_file: dict[str, list[list[tuple[int, int]]]] = {}
+        self.scanline_intervals_by_file: dict[str, list[tuple[int, int]]] = {}
 
     def clear_FlightData(self):
         logger.debug("clear_FlightData")
         self.fileDataBase = {}
+        self.sources = {}
+        self.timelines = {}
+        self.segments = {}
+        self.active_timeline_id = None
+        self.active_segment_ids = []
+        self.scanline_df_by_file = {}
+        self.scanline_groups_by_file = {}
+        self.scanline_intervals_by_file = {}
 
     def load_FlightData(self, file_name):
         basename = Path(file_name).stem
         try:
-            self.fileDataBase[basename] = self._convert(pd.read_csv(file_name))
+            df = self._convert(pd.read_csv(file_name))
+            self.sources[basename] = Source(
+                source_id=basename, path=str(file_name), df=df
+            )
+            self.fileDataBase[basename] = df
         except Exception as e:
             logger.error(f"Error loading {file_name}: {e}")
 
+    # DEPRECATED: legacy merge path; kept for compatibility.
     def merge_CSVtodf(self, files) -> pd.DataFrame | None:
         """여러 CSV 파일을 하나의 DataFrame으로 병합해서 리턴"""
         df_list = []
@@ -93,6 +167,9 @@ class DataManager:
         return (32600 if lat >= 0 else 32700) + zone
 
     def get_FlightData(self, file_name):
+        src = self.sources.get(file_name)
+        if src is not None:
+            return src.df
         return self.fileDataBase.get(file_name)
 
     def get_XYMagData(self, df):
@@ -147,11 +224,272 @@ class DataManager:
 
         return df
 
+    def get_filtered_intervals(self, df, settings, degree) -> list[tuple[int, int]]:
+        if df is None or df.empty:
+            return []
+        filtered = self.get_filtered_data(df, settings, degree)
+        if filtered is None or filtered.empty:
+            return []
+        return self.df_to_intervals(filtered)
+
     def put_combined_df(self, df: pd.DataFrame):
+        # DEPRECATED: legacy combined dataframe path.
         self.combined_df = pd.concat([self.combined_df, df], ignore_index=True)
 
     def clear_combined_df(self):
         self.combined_df = pd.DataFrame()
+
+    def update_scanline_state(
+        self,
+        df_by_file: dict[str, pd.DataFrame] | None = None,
+        groups_by_file: dict[str, list[list[tuple[int, int]]]] | None = None,
+        intervals_by_file: dict[str, list[tuple[int, int]]] | None = None,
+    ) -> None:
+        if df_by_file is None:
+            self.scanline_df_by_file = {}
+        else:
+            self.scanline_df_by_file = dict(df_by_file)
+
+        if groups_by_file is None:
+            self.scanline_groups_by_file = {}
+        else:
+            self.scanline_groups_by_file = {
+                key: [list(group) for group in groups]
+                for key, groups in groups_by_file.items()
+            }
+
+        if intervals_by_file is None:
+            self.scanline_intervals_by_file = {}
+        else:
+            self.scanline_intervals_by_file = {
+                key: list(intervals) for key, intervals in intervals_by_file.items()
+            }
+
+    def clear_segments_for_timeline(self, timeline_id: str) -> None:
+        if not timeline_id:
+            return
+        to_remove = [
+            seg_id
+            for seg_id, seg in self.segments.items()
+            if seg.timeline_id == timeline_id
+        ]
+        for seg_id in to_remove:
+            self.segments.pop(seg_id, None)
+        if self.active_segment_ids:
+            self.active_segment_ids = [
+                seg_id for seg_id in self.active_segment_ids if seg_id not in to_remove
+            ]
+
+    def reset_timeline(self, timeline_id: str, source_ids: list[str]) -> Timeline:
+        timeline = self.timelines.get(timeline_id)
+        if timeline is None:
+            timeline = Timeline(timeline_id=timeline_id, source_ids=list(source_ids))
+            self.timelines[timeline_id] = timeline
+        else:
+            if timeline.source_ids != list(source_ids):
+                timeline.source_ids = list(source_ids)
+        timeline.build_offsets(self.sources)
+        self.active_timeline_id = timeline_id
+        self.clear_segments_for_timeline(timeline_id)
+        return timeline
+
+    # Example usage:
+    #   self.create_timeline("tl0", ["file_a", "file_b"])
+    #   self.create_segment_from_range("seg0", "tl0", 100, 200, meta={"label": "A"})
+    #   x, y, c = self.get_scatter_arrays("seg0", "X", "Y", "Mag", stride=5)
+    def create_timeline(self, timeline_id: str, source_ids: list[str]) -> Timeline:
+        timeline = Timeline(timeline_id=timeline_id, source_ids=list(source_ids))
+        timeline.build_offsets(self.sources)
+        self.timelines[timeline_id] = timeline
+        self.active_timeline_id = timeline_id
+        return timeline
+
+    def create_segment_from_range(
+        self,
+        segment_id: str,
+        timeline_id: str,
+        g0: int,
+        g1: int,
+        meta: dict[str, Any] | None = None,
+    ) -> Segment:
+        if g0 >= g1:
+            raise ValueError(f"Invalid interval: [{g0}, {g1})")
+        return self.create_segment(segment_id, timeline_id, [(g0, g1)], meta=meta)
+
+    def create_segment(
+        self,
+        segment_id: str,
+        timeline_id: str,
+        intervals: list[tuple[int, int]],
+        meta: dict[str, Any] | None = None,
+    ) -> Segment:
+        if timeline_id not in self.timelines:
+            raise KeyError(f"Unknown timeline_id: {timeline_id}")
+        cleaned = normalize_intervals(intervals)
+        seg = Segment(
+            segment_id=segment_id,
+            timeline_id=timeline_id,
+            intervals=cleaned,
+            meta=dict(meta) if meta else {},
+        )
+        self.segments[segment_id] = seg
+        if segment_id not in self.active_segment_ids:
+            self.active_segment_ids.append(segment_id)
+        return seg
+
+    def df_to_intervals(self, df: pd.DataFrame) -> list[tuple[int, int]]:
+        if df is None or df.empty:
+            return []
+        if "record_id" in df.columns:
+            ids = pd.to_numeric(df["record_id"], errors="coerce").dropna()
+            values = ids.astype(int).to_numpy()
+        else:
+            values = np.arange(len(df), dtype=int)
+        if values.size == 0:
+            return []
+        values = np.unique(values)
+        values.sort()
+
+        intervals: list[tuple[int, int]] = []
+        start = int(values[0])
+        prev = int(values[0])
+        for val in values[1:]:
+            cur = int(val)
+            if cur == prev + 1:
+                prev = cur
+                continue
+            intervals.append((start, prev + 1))
+            start = cur
+            prev = cur
+        intervals.append((start, prev + 1))
+        return intervals
+
+    def _iter_interval_slices(
+        self, timeline: Timeline, g0: int, g1: int
+    ) -> list[tuple[Source, int, int]]:
+        if g0 >= g1:
+            return []
+        if not timeline.offsets:
+            timeline.build_offsets(self.sources)
+        if g0 < 0 or g1 > timeline.length:
+            raise ValueError(
+                f"Interval out of range: [{g0}, {g1}) length={timeline.length}"
+            )
+
+        slices: list[tuple[Source, int, int]] = []
+        start_idx = bisect_right(timeline.offsets, g0) - 1
+        if start_idx < 0:
+            start_idx = 0
+        for idx in range(start_idx, len(timeline.source_ids)):
+            source_id = timeline.source_ids[idx]
+            src = self.sources.get(source_id)
+            if src is None:
+                raise KeyError(f"Unknown source_id: {source_id}")
+            start = timeline.offsets[idx]
+            end = start + len(src.df)
+            if g1 <= start:
+                break
+            if g0 >= end:
+                continue
+            local_start = max(g0, start) - start
+            local_end = min(g1, end) - start
+            if local_start < local_end:
+                slices.append((src, int(local_start), int(local_end)))
+        return slices
+
+    def materialize_segment_df(
+        self, segment_id: str, columns: list[str] | str | None = None
+    ) -> pd.DataFrame:
+        seg = self.segments.get(segment_id)
+        if seg is None:
+            raise KeyError(f"Unknown segment_id: {segment_id}")
+        timeline = self.timelines.get(seg.timeline_id)
+        if timeline is None:
+            raise KeyError(f"Unknown timeline_id: {seg.timeline_id}")
+        col_list: list[str] | None
+        if columns is None:
+            col_list = None
+        elif isinstance(columns, str):
+            col_list = [columns]
+        else:
+            col_list = list(columns)
+
+        parts: list[pd.DataFrame] = []
+        for g0, g1 in seg.intervals:
+            for src, local_start, local_end in self._iter_interval_slices(
+                timeline, g0, g1
+            ):
+                if col_list is None:
+                    part = src.df.iloc[local_start:local_end].copy()
+                else:
+                    part = src.df.iloc[local_start:local_end][col_list].copy()
+                if not part.empty:
+                    parts.append(part)
+
+        if not parts:
+            if col_list is None:
+                return pd.DataFrame()
+            return pd.DataFrame(columns=col_list)
+
+        return pd.concat(parts, ignore_index=True)
+
+    def get_scatter_arrays(
+        self,
+        segment_id: str,
+        x_col: str,
+        y_col: str,
+        c_col: str | None = None,
+        stride: int = 1,
+    ):
+        if stride < 1:
+            raise ValueError("stride must be >= 1")
+        seg = self.segments.get(segment_id)
+        if seg is None:
+            raise KeyError(f"Unknown segment_id: {segment_id}")
+        timeline = self.timelines.get(seg.timeline_id)
+        if timeline is None:
+            raise KeyError(f"Unknown timeline_id: {seg.timeline_id}")
+
+        xs: list[np.ndarray] = []
+        ys: list[np.ndarray] = []
+        cs: list[np.ndarray] = []
+        for g0, g1 in seg.intervals:
+            for src, local_start, local_end in self._iter_interval_slices(
+                timeline, g0, g1
+            ):
+                sl = slice(local_start, local_end, stride)
+                xs.append(src.df[x_col].iloc[sl].to_numpy(copy=False))
+                ys.append(src.df[y_col].iloc[sl].to_numpy(copy=False))
+                if c_col is not None:
+                    cs.append(src.df[c_col].iloc[sl].to_numpy(copy=False))
+
+        if not xs:
+            empty = np.array([], dtype=float)
+            if c_col is None:
+                return empty, empty
+            return empty, empty, empty
+
+        x_arr = np.concatenate(xs)
+        y_arr = np.concatenate(ys)
+        if c_col is None:
+            return x_arr, y_arr
+        c_arr = np.concatenate(cs) if cs else np.array([], dtype=float)
+        return x_arr, y_arr, c_arr
+
+    def _debug_dump(self) -> None:
+        logger.info(
+            "debug_dump: sources=%d timelines=%d segments=%d",
+            len(self.sources),
+            len(self.timelines),
+            len(self.segments),
+        )
+        for timeline_id, timeline in self.timelines.items():
+            logger.info(
+                "debug_dump: timeline_id=%s length=%d sources=%d",
+                timeline_id,
+                timeline.length,
+                len(timeline.source_ids),
+            )
 
     def save_all_continuous_record_groups(
         self,
@@ -215,6 +553,61 @@ class DataManager:
         import numpy as np
         import pandas as pd
 
+        scanline_df_by_file = getattr(self, "scanline_df_by_file", {})
+        if scanline_df_by_file:
+            saved_files: list[str] = []
+            outdir: Path | None = None
+            groups_by_file = getattr(self, "scanline_groups_by_file", {}) or {}
+            intervals_by_file = getattr(self, "scanline_intervals_by_file", {}) or {}
+            for filename, df in scanline_df_by_file.items():
+                if df is None or df.empty:
+                    continue
+                work = df
+                if "record_id" not in work.columns:
+                    work = work.copy()
+                    work["record_id"] = np.arange(len(work))
+                record_ids = pd.to_numeric(
+                    work["record_id"], errors="coerce"
+                ).to_numpy()
+                if record_ids.size == 0:
+                    continue
+
+                groups = groups_by_file.get(filename)
+                if not groups:
+                    intervals = intervals_by_file.get(filename)
+                    if not intervals:
+                        intervals = self.df_to_intervals(work)
+                    groups = [[interval] for interval in intervals]
+
+                for group in groups:
+                    if not group:
+                        continue
+                    mask = np.zeros(len(work), dtype=bool)
+                    for start, end in group:
+                        mask |= (record_ids >= start) & (record_ids < end)
+                    g = work.loc[mask].copy()
+                    if g.empty:
+                        continue
+                    g["record_id"] = pd.to_numeric(g["record_id"], errors="coerce")
+                    g = g.sort_values("record_id").reset_index(drop=True)
+
+                    if outdir is None:
+                        outdir = Path(output_dir)
+                        outdir.mkdir(parents=True, exist_ok=True)
+                    fpath = outdir / f"{prefix}_{len(saved_files) + 1}.csv"
+                    try:
+                        g.to_csv(fpath, index=False)
+                        logger.debug(
+                            f"Saved group #{len(saved_files) + 1} -> {fpath}"
+                        )
+                        saved_files.append(str(fpath))
+                    except Exception as e:
+                        logger.error(
+                            f"Failed to save group #{len(saved_files) + 1} to {fpath}: {e}"
+                        )
+
+            return saved_files
+
         df = getattr(self, "combined_df", pd.DataFrame())
         if df is None or df.empty or not {"record_id", "X", "Y"}.issubset(df.columns):
             return []
@@ -245,6 +638,28 @@ class DataManager:
 
         if not groups:
             return []
+
+        # Merge-by-direction disabled; save each continuous record_id group as-is.
+        saved_files: list[str] = []
+        outdir = Path(output_dir)
+        outdir.mkdir(parents=True, exist_ok=True)
+        for idx, item in enumerate(groups, start=1):
+            g = item["df"].reset_index(drop=True)
+            if "record_id" in g.columns:
+                g["record_id"] = pd.to_numeric(g["record_id"], errors="coerce")
+                g = g.sort_values("record_id").reset_index(drop=True)
+            fpath = outdir / f"{prefix}_{idx}.csv"
+            try:
+                g.to_csv(fpath, index=False)
+                logger.debug(f"Saved group #{idx} -> {fpath}")
+                saved_files.append(str(fpath))
+            except Exception as e:
+                logger.error(f"Failed to save group #{idx} to {fpath}: {e}")
+
+        return saved_files
+
+        # Merge-by-direction code kept for reference (disabled).
+        """
 
         # 2) 길이 내림차순(긴 것 먼저)
         groups.sort(key=lambda it: it["n"], reverse=True)
@@ -329,6 +744,8 @@ class DataManager:
                 )
 
         return saved_files
+
+        """
 
     # def filter_straight_segments(
     #     self, df: pd.DataFrame, angle_change_threshold_deg: float = 1.0
