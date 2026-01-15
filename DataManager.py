@@ -74,6 +74,7 @@ class DataManager:
         self.scanline_df_by_file: dict[str, pd.DataFrame] = {}
         self.scanline_groups_by_file: dict[str, list[list[tuple[int, int]]]] = {}
         self.scanline_intervals_by_file: dict[str, list[tuple[int, int]]] = {}
+        self.scanline_cross_groups: list[list[tuple[str, list[tuple[int, int]]]]] = []
 
     def clear_FlightData(self):
         logger.debug("clear_FlightData")
@@ -86,6 +87,7 @@ class DataManager:
         self.scanline_df_by_file = {}
         self.scanline_groups_by_file = {}
         self.scanline_intervals_by_file = {}
+        self.scanline_cross_groups = []
 
     def load_FlightData(self, file_name):
         basename = Path(file_name).stem
@@ -244,6 +246,7 @@ class DataManager:
         df_by_file: dict[str, pd.DataFrame] | None = None,
         groups_by_file: dict[str, list[list[tuple[int, int]]]] | None = None,
         intervals_by_file: dict[str, list[tuple[int, int]]] | None = None,
+        cross_groups: list[list[tuple[str, list[tuple[int, int]]]]] | None = None,
     ) -> None:
         if df_by_file is None:
             self.scanline_df_by_file = {}
@@ -264,6 +267,14 @@ class DataManager:
             self.scanline_intervals_by_file = {
                 key: list(intervals) for key, intervals in intervals_by_file.items()
             }
+
+        if cross_groups is None:
+            self.scanline_cross_groups = []
+        else:
+            self.scanline_cross_groups = [
+                [(fname, list(intervals)) for fname, intervals in group]
+                for group in cross_groups
+            ]
 
     def clear_segments_for_timeline(self, timeline_id: str) -> None:
         if not timeline_id:
@@ -559,6 +570,59 @@ class DataManager:
             outdir: Path | None = None
             groups_by_file = getattr(self, "scanline_groups_by_file", {}) or {}
             intervals_by_file = getattr(self, "scanline_intervals_by_file", {}) or {}
+            cross_groups = getattr(self, "scanline_cross_groups", []) or []
+            skip_groups: set[tuple[str, tuple[tuple[int, int], ...]]] = set()
+
+            if cross_groups:
+                for group in cross_groups:
+                    for fname, intervals in group:
+                        skip_groups.add((fname, tuple(intervals)))
+
+                for group in cross_groups:
+                    parts: list[pd.DataFrame] = []
+                    for fname, intervals in group:
+                        df = scanline_df_by_file.get(fname)
+                        if df is None or df.empty:
+                            continue
+                        work = df
+                        if "record_id" not in work.columns:
+                            work = work.copy()
+                            work["record_id"] = np.arange(len(work))
+                        record_ids = pd.to_numeric(
+                            work["record_id"], errors="coerce"
+                        ).to_numpy()
+                        if record_ids.size == 0:
+                            continue
+                        mask = np.zeros(len(work), dtype=bool)
+                        for start, end in intervals:
+                            mask |= (record_ids >= start) & (record_ids < end)
+                        g = work.loc[mask].copy()
+                        if g.empty:
+                            continue
+                        g["record_id"] = pd.to_numeric(
+                            g["record_id"], errors="coerce"
+                        )
+                        g = g.sort_values("record_id").reset_index(drop=True)
+                        parts.append(g)
+
+                    if not parts:
+                        continue
+
+                    if outdir is None:
+                        outdir = Path(output_dir)
+                        outdir.mkdir(parents=True, exist_ok=True)
+                    merged = pd.concat(parts, ignore_index=True)
+                    fpath = outdir / f"{prefix}_{len(saved_files) + 1}.csv"
+                    try:
+                        merged.to_csv(fpath, index=False)
+                        logger.debug(
+                            f"Saved group #{len(saved_files) + 1} -> {fpath}"
+                        )
+                        saved_files.append(str(fpath))
+                    except Exception as e:
+                        logger.error(
+                            f"Failed to save group #{len(saved_files) + 1} to {fpath}: {e}"
+                        )
             for filename, df in scanline_df_by_file.items():
                 if df is None or df.empty:
                     continue
@@ -581,6 +645,8 @@ class DataManager:
 
                 for group in groups:
                     if not group:
+                        continue
+                    if (filename, tuple(group)) in skip_groups:
                         continue
                     mask = np.zeros(len(work), dtype=bool)
                     for start, end in group:
