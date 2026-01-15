@@ -2,6 +2,7 @@ import math
 import os
 from pathlib import Path
 from typing import Optional
+from xml.sax.saxutils import escape
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -179,6 +180,7 @@ class FlightPlotWidget(QWidget):
         )
         self.actionDataCutDisp.toggled.connect(self._on_linecut_toggled)
         self.actionDataXXXDisp.toggled.connect(self._on_lineappend_toggled)
+        self.actionDataOut.triggered.connect(self.exportKML)
 
     def actionEnable(self, action=True):
         self.actionOpenFileBrower.setEnabled(action)
@@ -387,6 +389,7 @@ class FlightPlotWidget(QWidget):
         self.updatePlot()
         if action == "done":
             self.actionDataXXXDisp.setChecked(False)
+            self._save_line_edit_state()
         return True
 
     def _prompt_lineappend_action(self):
@@ -593,6 +596,7 @@ class FlightPlotWidget(QWidget):
         self.updatePlot()
         if changed:
             self.actionDataCutDisp.setChecked(False)
+            self._save_line_edit_state()
         return True
 
     def _find_nearest_plot_point(self, x, y):
@@ -812,6 +816,198 @@ class FlightPlotWidget(QWidget):
         except Exception:
             pass
         self._legend = None
+
+    def _current_file_names(self):
+        return {
+            self.fileListWidget.item(i).text()
+            for i in range(self.fileListWidget.count())
+        }
+
+    def _serialize_line_edit_state(self) -> dict:
+        return {
+            "cut_points": {
+                fname: sorted(int(p) for p in points)
+                for fname, points in self._line_cut_points.items()
+            },
+            "delete_points": {
+                fname: sorted(int(p) for p in points)
+                for fname, points in self._line_delete_points.items()
+            },
+            "append_links": {
+                fname: [[int(a), int(b)] for a, b in links]
+                for fname, links in self._line_append_links.items()
+            },
+            "append_cross_links": [
+                [[fa, int(ida)], [fb, int(idb)]]
+                for (fa, ida), (fb, idb) in self._line_append_cross_links
+            ],
+        }
+
+    def _extract_latlon_alt(self, df):
+        lat_series = df.get("Latitude")
+        lon_series = df.get("Longitude")
+        if lat_series is not None and lon_series is not None:
+            lats = pd.to_numeric(lat_series, errors="coerce").to_numpy()
+            lons = pd.to_numeric(lon_series, errors="coerce").to_numpy()
+        else:
+            if not {"X", "Y"}.issubset(df.columns):
+                return None, None, None
+            epsg = None
+            if "CRS_EPSG" in df.columns:
+                try:
+                    epsg = int(df["CRS_EPSG"].iloc[0])
+                except Exception:
+                    epsg = None
+            if epsg is None and self._last_epsg:
+                try:
+                    epsg = int(self._last_epsg)
+                except Exception:
+                    epsg = None
+            if epsg is None:
+                return None, None, None
+            transformer = Transformer.from_crs(
+                f"EPSG:{int(epsg)}", "EPSG:4326", always_xy=True
+            )
+            xs = pd.to_numeric(df["X"], errors="coerce").to_numpy()
+            ys = pd.to_numeric(df["Y"], errors="coerce").to_numpy()
+            lons, lats = transformer.transform(xs, ys)
+
+        alt = None
+        if "Altitude" in df.columns:
+            alt = pd.to_numeric(df["Altitude"], errors="coerce").to_numpy()
+        return lats, lons, alt
+
+    def exportKML(self):
+        if not self._plot_df_by_file:
+            self.updatePlot()
+        if not self._plot_df_by_file:
+            QMessageBox.information(self, "Export KML", "No data to export.")
+            return
+
+        proj_path = Path(config.get("project_path", ""))
+        if proj_path:
+            default_path = proj_path / "flight_plot.kml"
+        else:
+            default_path = Path.cwd() / "flight_plot.kml"
+
+        file_path, _ = QFileDialog.getSaveFileName(
+            parent=self,
+            caption="Export KML",
+            dir=str(default_path),
+            filter="KML files (*.kml);;All files (*)",
+        )
+        if not file_path:
+            return
+
+        try:
+            total_points = 0
+            with open(file_path, "w", encoding="utf-8") as f:
+                f.write('<?xml version="1.0" encoding="UTF-8"?>\n')
+                f.write('<kml xmlns="http://www.opengis.net/kml/2.2">\n')
+                f.write("  <Document>\n")
+                f.write("    <name>Flight Plot</name>\n")
+
+                for fname, df in self._plot_df_by_file.items():
+                    if df is None or df.empty:
+                        continue
+                    lats, lons, alts = self._extract_latlon_alt(df)
+                    if lats is None or lons is None:
+                        logger.warning(
+                            f"Export KML: missing lat/lon for {fname}, skipping."
+                        )
+                        continue
+                    f.write(f"    <Folder><name>{escape(str(fname))}</name>\n")
+                    for idx, (lat, lon) in enumerate(zip(lats, lons)):
+                        if np.isnan(lat) or np.isnan(lon):
+                            continue
+                        alt = 0.0
+                        if alts is not None:
+                            alt_val = alts[idx]
+                            if not np.isnan(alt_val):
+                                alt = float(alt_val)
+                        f.write("      <Placemark>\n")
+                        f.write(
+                            "        <Point><coordinates>"
+                            f"{float(lon)},{float(lat)},{alt}"
+                            "</coordinates></Point>\n"
+                        )
+                        f.write("      </Placemark>\n")
+                        total_points += 1
+                    f.write("    </Folder>\n")
+
+                f.write("  </Document>\n")
+                f.write("</kml>\n")
+
+            if total_points == 0:
+                QMessageBox.warning(
+                    self,
+                    "Export KML",
+                    "No valid coordinates to export.",
+                )
+            else:
+                QMessageBox.information(
+                    self,
+                    "Export KML",
+                    f"Saved {total_points} points to:\n{file_path}",
+                )
+        except Exception as err:
+            logger.error(f"Export KML failed: {err}")
+            QMessageBox.critical(
+                self,
+                "Export KML",
+                f"Failed to export KML:\n{err}",
+            )
+
+    def _save_line_edit_state(self) -> None:
+        if config.file_path is None:
+            return
+        try:
+            config.set(
+                "flight_line_edit_state",
+                self._serialize_line_edit_state(),
+                save=True,
+            )
+        except Exception as err:
+            logger.warning(f"Failed to save line edit state: {err}")
+
+    def _load_line_edit_state(self) -> None:
+        state = config.get("flight_line_edit_state", {}) or {}
+        valid_files = self._current_file_names()
+
+        self._line_cut_points = {}
+        self._line_delete_points = {}
+        self._line_append_links = {}
+        self._line_append_cross_links = []
+        self._line_append_groups_by_file = {}
+        self._line_append_cross_groups = []
+        self._clear_line_append_selection()
+        self._linecut_preview = None
+        self._linecut_point = None
+
+        for fname, points in (state.get("cut_points") or {}).items():
+            if fname in valid_files:
+                self._line_cut_points[fname] = {int(p) for p in points}
+
+        for fname, points in (state.get("delete_points") or {}).items():
+            if fname in valid_files:
+                self._line_delete_points[fname] = {int(p) for p in points}
+
+        for fname, links in (state.get("append_links") or {}).items():
+            if fname in valid_files:
+                cleaned = []
+                for a, b in links:
+                    cleaned.append((int(a), int(b)))
+                self._line_append_links[fname] = cleaned
+
+        for link in state.get("append_cross_links") or []:
+            try:
+                (fa, ida), (fb, idb) = link
+            except Exception:
+                continue
+            if fa in valid_files and fb in valid_files:
+                self._line_append_cross_links.append(
+                    ((fa, int(ida)), (fb, int(idb)))
+                )
 
     def _clear_plot_for_empty_selection(self, title: str) -> None:
         self._clear_overlay_artists()
@@ -1426,6 +1622,17 @@ class FlightPlotWidget(QWidget):
                 list_files.remove(name)
             config.set("Flight_File_List", list_files, save=True)
 
+            self._line_cut_points.pop(name, None)
+            self._line_delete_points.pop(name, None)
+            self._line_append_links.pop(name, None)
+            self._line_append_groups_by_file.pop(name, None)
+            if self._line_append_cross_links:
+                self._line_append_cross_links = [
+                    link
+                    for link in self._line_append_cross_links
+                    if name not in (link[0][0], link[1][0])
+                ]
+            self._save_line_edit_state()
             self.updatePlot()
 
     def delete_all_items(self):
@@ -1444,6 +1651,7 @@ class FlightPlotWidget(QWidget):
         self._linecut_preview = None
         self._linecut_point = None
         self._lineappend_points = []
+        self._save_line_edit_state()
         self.updatePlot()
 
     def on_canvas_click(self, event):
@@ -1467,6 +1675,8 @@ class FlightPlotWidget(QWidget):
     @Slot(str)
     def on_project_opened(self, project_path: str):
         self.initialize()
+        self._load_line_edit_state()
+        self.updatePlot()
 
     @Slot()
     def on_project_reset(self):
