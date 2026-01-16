@@ -6,8 +6,11 @@ from loguru import logger
 from PySide6.QtCore import Qt, Signal, QSettings, QByteArray
 from PySide6.QtGui import QAction, QIcon
 from PySide6.QtWidgets import (
+    QCheckBox,
     QDialog,
     QFileDialog,
+    QHBoxLayout,
+    QLineEdit,
     QMainWindow,
     QMessageBox,
     QPushButton,
@@ -156,6 +159,12 @@ class KLuxMap(QMainWindow):
 
         help_menu = menu_bar.addMenu("Help")
 
+        self.maps_api_key_action = QAction(QIcon(), "Google Maps API Key", self)
+        self.maps_api_key_action.setStatusTip(
+            "Set the Google Maps API key (stored in user settings)"
+        )
+        help_menu.addAction(self.maps_api_key_action)
+
         self.settings_action = QAction(QIcon(), "Settings", self)
         self.settings_action.setStatusTip("Show current project settings")
         help_menu.addAction(self.settings_action)
@@ -185,6 +194,7 @@ class KLuxMap(QMainWindow):
         self.config_action.triggered.connect(
             lambda checked=False: ConfigDataSettingsDialog(self).exec()
         )
+        self.maps_api_key_action.triggered.connect(self.editGoogleMapsApiKey)
         self.settings_action.triggered.connect(self.showProjectSettingsDialog)
         self.about_action.triggered.connect(self.showAboutDialog)
 
@@ -198,6 +208,51 @@ class KLuxMap(QMainWindow):
             "About",
             "This is the KLuxMap application \nfor magnetic data viewing, \ndeveloped by KIGAM and GEOLUX.",
         )
+
+    def editGoogleMapsApiKey(self):
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Google Maps API Key")
+        dlg.resize(480, 140)
+
+        layout = QVBoxLayout(dlg)
+        layout.addWidget(
+            QLabel("Enter your Google Maps API key (stored in user settings).", dlg)
+        )
+
+        key_edit = QLineEdit(dlg)
+        key_edit.setEchoMode(QLineEdit.Password)
+        current_key = self.settings.value("google_maps_api_key", "", type=str)
+        if current_key:
+            key_edit.setText(current_key)
+        layout.addWidget(key_edit)
+
+        show_checkbox = QCheckBox("Show key", dlg)
+        show_checkbox.toggled.connect(
+            lambda checked: key_edit.setEchoMode(
+                QLineEdit.Normal if checked else QLineEdit.Password
+            )
+        )
+        layout.addWidget(show_checkbox)
+
+        button_row = QHBoxLayout()
+        save_btn = QPushButton("Save", dlg)
+        clear_btn = QPushButton("Clear", dlg)
+        cancel_btn = QPushButton("Cancel", dlg)
+        save_btn.clicked.connect(dlg.accept)
+        cancel_btn.clicked.connect(dlg.reject)
+        clear_btn.clicked.connect(lambda: key_edit.setText(""))
+        button_row.addWidget(save_btn)
+        button_row.addWidget(clear_btn)
+        button_row.addWidget(cancel_btn)
+        layout.addLayout(button_row)
+
+        if dlg.exec():
+            new_key = key_edit.text().strip()
+            if new_key:
+                self.settings.setValue("google_maps_api_key", new_key)
+            else:
+                self.settings.remove("google_maps_api_key")
+            self.settings.sync()
 
     def showProjectSettingsDialog(self):
         settings_path = config.file_path

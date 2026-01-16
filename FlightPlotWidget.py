@@ -14,11 +14,20 @@ from pyproj import Transformer
 
 GOOGLE_MAPS_API_KEY_HARDCODED = "AIzaSyD1zF_979D6PEvhKJvI9ZvSf27UZ-MtqYw"
 
+MAP_TYPE_OPTIONS = (
+    ("None", "none"),
+    ("Roadmap", "roadmap"),
+    ("Satellite", "satellite"),
+    ("Hybrid", "hybrid"),
+    ("Terrain", "terrain"),
+)
+
 # 파일 상단에 추가
-from PySide6.QtCore import Qt, QSignalBlocker, Slot
+from PySide6.QtCore import Qt, QSettings, QSignalBlocker, Slot
 from PySide6.QtGui import QAction, QCursor, QIcon, QImage, QPixmap
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QComboBox,
     QDialog,
     QFileDialog,
     QFrame,
@@ -136,6 +145,9 @@ class FlightPlotWidget(QWidget):
         # )
         vbox_layout.addWidget(
             self.createFileList(), alignment=Qt.AlignmentFlag.AlignLeft
+        )
+        vbox_layout.addWidget(
+            self.createMapTypeSelector(), alignment=Qt.AlignmentFlag.AlignLeft
         )
         vbox_layout.addWidget(
             self.createLogoLabel(), alignment=Qt.AlignmentFlag.AlignHCenter
@@ -264,6 +276,27 @@ class FlightPlotWidget(QWidget):
         )
         return self.fileListWidget
 
+    def createMapTypeSelector(self):
+        container = QWidget()
+        layout = QVBoxLayout(container)
+        layout.setContentsMargins(0, 6, 0, 0)
+        layout.setSpacing(4)
+
+        label = QLabel("Background Map")
+        self.mapTypeCombo = QComboBox()
+        self.mapTypeCombo.setMaximumWidth(200)
+        for label_text, value in MAP_TYPE_OPTIONS:
+            self.mapTypeCombo.addItem(label_text, value)
+        current = self.map_type or "none"
+        current_index = self.mapTypeCombo.findData(current)
+        if current_index != -1:
+            self.mapTypeCombo.setCurrentIndex(current_index)
+        self.mapTypeCombo.currentIndexChanged.connect(self._on_map_type_changed)
+
+        layout.addWidget(label)
+        layout.addWidget(self.mapTypeCombo)
+        return container
+
     def createCanvasPlot(self):
         """Create a canvas plot using matplotlib"""
         # matplotlib plot 설정
@@ -292,9 +325,6 @@ class FlightPlotWidget(QWidget):
 
     def on_press(self, event):
         if event.button == 1 and self._handle_line_marker(event):
-            return
-        if event.button == 3:
-            self.show_map_context_menu()
             return
         if event.button == 1 and event.inaxes == self.ax:
             self._is_panning = True
@@ -1577,7 +1607,7 @@ class FlightPlotWidget(QWidget):
         if "background_map_type" in filters:
             filters.pop("background_map_type", None)
         config.set("filters", filters, save=True)
-        self.map_type = "none"
+        self._set_map_type("none", update_plot=False, log_source="initialize")
         logger.debug(
             f"initialize: filters loaded (background_map_type={self.map_type}, show_backgroundmap={filters.get('show_backgroundmap')})"
         )
@@ -1682,6 +1712,37 @@ class FlightPlotWidget(QWidget):
     def on_project_reset(self):
         self.delete_all_items()
 
+    def _sync_map_type_selector(self, map_type: str) -> None:
+        if not hasattr(self, "mapTypeCombo"):
+            return
+        index = self.mapTypeCombo.findData(map_type)
+        if index == -1:
+            return
+        if self.mapTypeCombo.currentIndex() == index:
+            return
+        blocker = QSignalBlocker(self.mapTypeCombo)
+        self.mapTypeCombo.setCurrentIndex(index)
+
+    def _set_map_type(
+        self, map_type: str, update_plot: bool = True, log_source: str = "selector"
+    ) -> None:
+        chosen = map_type or "none"
+        current = self.map_type or "none"
+        if chosen == current:
+            logger.debug(f"map type: chosen={chosen}, unchanged -> skip update")
+            return
+        self.map_type = chosen
+        self._sync_map_type_selector(chosen)
+        logger.debug(f"map type: chosen={chosen}, updating plot (source={log_source})")
+        if update_plot:
+            self.updatePlot()
+
+    def _on_map_type_changed(self, index: int) -> None:
+        if index < 0:
+            return
+        chosen = self.mapTypeCombo.itemData(index)
+        self._set_map_type(str(chosen), log_source="selector")
+
     def show_map_context_menu(self):
         menu = QMenu(self)
         actions = {
@@ -1713,11 +1774,16 @@ class FlightPlotWidget(QWidget):
         self.updatePlot()
 
     def _get_api_key(self) -> Optional[str]:
-        # Prefer environment/configured key; embedded key is a last resort and may be blocked.
+        # Prefer environment/user settings; embedded key is a last resort and may be blocked.
         key = os.environ.get("GOOGLE_MAPS_API_KEY")
         if key:
             logger.debug("API key source: environment variable GOOGLE_MAPS_API_KEY")
             return key.strip()
+        settings = QSettings("Geolux", "KLuxMap")
+        stored_key = settings.value("google_maps_api_key", "", type=str)
+        if stored_key:
+            logger.debug("API key source: QSettings google_maps_api_key")
+            return stored_key.strip()
         cfg_key = config.get("google_maps_api_key")
         if cfg_key:
             logger.debug("API key source: config['google_maps_api_key']")
