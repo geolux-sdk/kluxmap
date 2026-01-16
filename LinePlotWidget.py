@@ -21,6 +21,8 @@ from PySide6.QtWidgets import (
     QListWidgetItem,
     QMenu,
     QMessageBox,
+    QSizePolicy,
+    QHeaderView,
     QTableWidget,
     QTableWidgetItem,
     QToolBar,
@@ -101,13 +103,14 @@ class LinePlotWidget(QWidget):
         ctrl_panel.setLayout(vbox_layout)
 
         data_layout = QHBoxLayout()
-        data_layout.addWidget(
-            self.createTableWidget(),
-            alignment=Qt.AlignmentFlag.AlignHCenter,
-        )
+        table_widget = self.createTableWidget()
+        data_layout.addWidget(table_widget, 1)
 
         # 스캐터 플롯과 컨트롤(체크박스)을 담을 컨테이너 위젯 생성
         scatter_container = QWidget()
+        scatter_container.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
+        )
         scatter_vbox = QVBoxLayout(scatter_container)
         scatter_vbox.setContentsMargins(0, 0, 0, 0)
 
@@ -121,22 +124,27 @@ class LinePlotWidget(QWidget):
             self.createScatterPlot()
         )  # 체크박스 아래에 스캐터 플롯 추가
 
-        data_layout.addWidget(scatter_container)
+        data_layout.addWidget(scatter_container, 1)
+        data_layout.setStretch(0, 1)
+        data_layout.setStretch(1, 1)
 
         dataV_layout = QVBoxLayout()
-        dataV_layout.addLayout(data_layout)
-        dataV_layout.addWidget(
-            self.createCanvasPlot(), alignment=Qt.AlignmentFlag.AlignHCenter
-        )
+        dataV_layout.addLayout(data_layout, 1)
+        dataV_layout.addWidget(self.createCanvasPlot(), 1)
 
         data_panel = QFrame()
         data_panel.setLayout(dataV_layout)
         data_panel.setLineWidth(3)
+        data_panel.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
+        )
 
         main_layout = QHBoxLayout()
         main_layout.setContentsMargins(1, 1, 1, 1)
         main_layout.addWidget(ctrl_panel)
         main_layout.addWidget(data_panel)
+        main_layout.setStretch(0, 0)
+        main_layout.setStretch(1, 1)
         layout.addLayout(main_layout)
         self.setLayout(layout)
 
@@ -159,11 +167,17 @@ class LinePlotWidget(QWidget):
         self.scatter_ax.set_ylabel("Sensor_Total")
         self.scatter_ax.grid(True)
         self.scatter_canvas = FigureCanvas(self.scatter_fig)
+        self.scatter_canvas.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
+        )
         return self.scatter_canvas
 
     def createCanvasPlot(self):
         self.fig, self.ax = plt.subplots(figsize=(12, 2), dpi=100)
         self.canvas = FigureCanvas(self.fig)
+        self.canvas.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
+        )
         self.canvas.mpl_connect("button_press_event", self._on_lineplot_press)
         self.canvas.mpl_connect("button_release_event", self._on_lineplot_release)
         return self.canvas
@@ -191,7 +205,9 @@ class LinePlotWidget(QWidget):
         self.tableWidget.setSelectionMode(
             QAbstractItemView.SelectionMode.SingleSelection
         )
-        self.tableWidget.setMinimumSize(500, 500)
+        self.tableWidget.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
+        )
         self.tableWidget.cellClicked.connect(self.on_table_cell_clicked)
 
         self.tableWidget.horizontalHeader().sectionClicked.connect(
@@ -199,6 +215,8 @@ class LinePlotWidget(QWidget):
         )
 
         header = self.tableWidget.horizontalHeader()
+        header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+        header.setStretchLastSection(True)
         header.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         header.customContextMenuRequested.connect(self.on_header_right_click)
 
