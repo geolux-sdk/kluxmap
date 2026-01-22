@@ -180,10 +180,6 @@ class DataManager:
     def get_filtered_data(self, df, settings, degree):
         logger.debug(settings)
         try:
-            # df = self.filter_by_dist(df, 1.0)
-            # if df.empty:
-            #     logger.warning("Filtered DataFrame is empty.")
-            #     return None
 
             if settings.get("show_area_bound", False):
                 df = self.boundary_rejection(df, config.get("bound_area_points"))
@@ -564,10 +560,21 @@ class DataManager:
         import numpy as np
         import pandas as pd
 
+        def _line_start_x(df: pd.DataFrame) -> float:
+            if df is None or df.empty or "X" not in df.columns:
+                return float("inf")
+            series = pd.to_numeric(df["X"], errors="coerce")
+            if series.empty:
+                return float("inf")
+            first = series.iloc[0]
+            if pd.isna(first):
+                return float("inf")
+            return float(first)
+
         scanline_df_by_file = getattr(self, "scanline_df_by_file", {})
         if scanline_df_by_file:
             saved_files: list[str] = []
-            outdir: Path | None = None
+            line_entries: list[dict[str, object]] = []
             groups_by_file = getattr(self, "scanline_groups_by_file", {}) or {}
             intervals_by_file = getattr(self, "scanline_intervals_by_file", {}) or {}
             cross_groups = getattr(self, "scanline_cross_groups", []) or []
@@ -608,21 +615,10 @@ class DataManager:
                     if not parts:
                         continue
 
-                    if outdir is None:
-                        outdir = Path(output_dir)
-                        outdir.mkdir(parents=True, exist_ok=True)
                     merged = pd.concat(parts, ignore_index=True)
-                    fpath = outdir / f"{prefix}_{len(saved_files) + 1}.csv"
-                    try:
-                        merged.to_csv(fpath, index=False)
-                        logger.debug(
-                            f"Saved group #{len(saved_files) + 1} -> {fpath}"
-                        )
-                        saved_files.append(str(fpath))
-                    except Exception as e:
-                        logger.error(
-                            f"Failed to save group #{len(saved_files) + 1} to {fpath}: {e}"
-                        )
+                    line_entries.append(
+                        {"df": merged, "start_x": _line_start_x(merged)}
+                    )
             for filename, df in scanline_df_by_file.items():
                 if df is None or df.empty:
                     continue
@@ -656,21 +652,25 @@ class DataManager:
                         continue
                     g["record_id"] = pd.to_numeric(g["record_id"], errors="coerce")
                     g = g.sort_values("record_id").reset_index(drop=True)
+                    line_entries.append({"df": g, "start_x": _line_start_x(g)})
 
-                    if outdir is None:
-                        outdir = Path(output_dir)
-                        outdir.mkdir(parents=True, exist_ok=True)
-                    fpath = outdir / f"{prefix}_{len(saved_files) + 1}.csv"
-                    try:
-                        g.to_csv(fpath, index=False)
-                        logger.debug(
-                            f"Saved group #{len(saved_files) + 1} -> {fpath}"
-                        )
-                        saved_files.append(str(fpath))
-                    except Exception as e:
-                        logger.error(
-                            f"Failed to save group #{len(saved_files) + 1} to {fpath}: {e}"
-                        )
+            if not line_entries:
+                return saved_files
+
+            line_entries.sort(key=lambda item: item["start_x"])
+            outdir = Path(output_dir)
+            outdir.mkdir(parents=True, exist_ok=True)
+            for entry in line_entries:
+                g = entry["df"]
+                fpath = outdir / f"{prefix}_{len(saved_files) + 1}.csv"
+                try:
+                    g.to_csv(fpath, index=False)
+                    logger.debug(f"Saved group #{len(saved_files) + 1} -> {fpath}")
+                    saved_files.append(str(fpath))
+                except Exception as e:
+                    logger.error(
+                        f"Failed to save group #{len(saved_files) + 1} to {fpath}: {e}"
+                    )
 
             return saved_files
 
@@ -704,6 +704,15 @@ class DataManager:
 
         if not groups:
             return []
+
+        def _safe_start_x(value: float) -> float:
+            try:
+                x = float(value)
+            except (TypeError, ValueError):
+                return float("inf")
+            return x if np.isfinite(x) else float("inf")
+
+        groups.sort(key=lambda it: _safe_start_x(it["start"][0]))
 
         # Merge-by-direction disabled; save each continuous record_id group as-is.
         saved_files: list[str] = []

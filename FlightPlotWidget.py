@@ -118,11 +118,11 @@ class FlightPlotWidget(QWidget):
         )
         self.actionDataConfiDisp.setStatusTip("Trim Filters Settings")
 
-        self.actionDataXXXDisp = QAction(
+        self.actionDataJoinDisp = QAction(
             QIcon(resource_path("imag_sum.png")), "Line Append", self
         )
-        self.actionDataXXXDisp.setStatusTip("Line Append")
-        self.actionDataXXXDisp.setCheckable(True)
+        self.actionDataJoinDisp.setStatusTip("Line Append")
+        self.actionDataJoinDisp.setCheckable(True)
 
         self.actionDataOut = QAction(
             QIcon(resource_path("imag_kml_export.png")), "Export KML", self
@@ -130,9 +130,9 @@ class FlightPlotWidget(QWidget):
         self.actionDataOut.setStatusTip("Export KML FILE")
 
         toolbar.addAction(self.actionOpenFileBrower)
-        toolbar.addAction(self.actionDataCutDisp)
         toolbar.addAction(self.actionDataConfiDisp)
-        toolbar.addAction(self.actionDataXXXDisp)
+        toolbar.addAction(self.actionDataCutDisp)
+        toolbar.addAction(self.actionDataJoinDisp)
         toolbar.addAction(self.actionDataOut)
 
         # 레이아웃에 툴바와 실제 콘텐츠(MainWidget)를 추가
@@ -180,7 +180,7 @@ class FlightPlotWidget(QWidget):
         self.actionOpenFileBrower.setEnabled(False)
         self.actionDataCutDisp.setEnabled(False)
         self.actionDataConfiDisp.setEnabled(False)
-        self.actionDataXXXDisp.setEnabled(False)
+        self.actionDataJoinDisp.setEnabled(False)
         self.actionDataOut.setEnabled(False)
 
         self.connectSingnal()
@@ -191,19 +191,19 @@ class FlightPlotWidget(QWidget):
             lambda checked=False: DataSettingsDialog(parent=self).exec()
         )
         self.actionDataCutDisp.toggled.connect(self._on_linecut_toggled)
-        self.actionDataXXXDisp.toggled.connect(self._on_lineappend_toggled)
+        self.actionDataJoinDisp.toggled.connect(self._on_lineappend_toggled)
         self.actionDataOut.triggered.connect(self.exportKML)
 
     def actionEnable(self, action=True):
         self.actionOpenFileBrower.setEnabled(action)
         self.actionDataCutDisp.setEnabled(action)   
         self.actionDataConfiDisp.setEnabled(action)
-        self.actionDataXXXDisp.setEnabled(action)
+        self.actionDataJoinDisp.setEnabled(action)
         self.actionDataOut.setEnabled(action)
 
     def _on_linecut_toggled(self, checked):
-        if checked and self.actionDataXXXDisp.isChecked():
-            self.actionDataXXXDisp.setChecked(False)
+        if checked and self.actionDataJoinDisp.isChecked():
+            self.actionDataJoinDisp.setChecked(False)
         if not checked:
             self._linecut_preview = None
         self._update_cursor_for_mode()
@@ -216,7 +216,7 @@ class FlightPlotWidget(QWidget):
         self._update_cursor_for_mode()
 
     def _update_cursor_for_mode(self):
-        if self.actionDataCutDisp.isChecked() or self.actionDataXXXDisp.isChecked():
+        if self.actionDataCutDisp.isChecked() or self.actionDataJoinDisp.isChecked():
             self.canvas.setCursor(Qt.CrossCursor)
         else:
             self.canvas.setCursor(Qt.ArrowCursor)
@@ -336,7 +336,7 @@ class FlightPlotWidget(QWidget):
             return False
         if not (
             self.actionDataCutDisp.isChecked()
-            or self.actionDataXXXDisp.isChecked()
+            or self.actionDataJoinDisp.isChecked()
         ):
             return False
         if event.xdata is None or event.ydata is None:
@@ -344,7 +344,7 @@ class FlightPlotWidget(QWidget):
 
         if self.actionDataCutDisp.isChecked():
             return self._handle_linecut_click(event, temporary=True)
-        if self.actionDataXXXDisp.isChecked():
+        if self.actionDataJoinDisp.isChecked():
             return self._handle_lineappend_click(event)
         return False
 
@@ -418,7 +418,7 @@ class FlightPlotWidget(QWidget):
         self._clear_line_append_selection()
         self.updatePlot()
         if action == "done":
-            self.actionDataXXXDisp.setChecked(False)
+            self.actionDataJoinDisp.setChecked(False)
             self._save_line_edit_state()
         return True
 
@@ -1089,7 +1089,8 @@ class FlightPlotWidget(QWidget):
                     seg["X"].values,
                     seg["Y"].values,
                     linewidth=3,
-                    c=color,
+                    marker="o",
+                    c="yellow",
                     zorder=6,
                 )[0]
                 artists.append(line)
@@ -1123,7 +1124,8 @@ class FlightPlotWidget(QWidget):
             seg["X"].values,
             seg["Y"].values,
             linewidth=3,
-            c="black",
+            marker="o",
+            c="yellow",
             zorder=6,
         )[0]
         return [line]
