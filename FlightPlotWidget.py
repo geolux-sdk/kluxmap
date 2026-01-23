@@ -38,6 +38,7 @@ from PySide6.QtWidgets import (
     QMenu,
     QMessageBox,
     QStyle,
+    QTabWidget,
     QToolBar,
     QVBoxLayout,
     QWidget,
@@ -78,6 +79,8 @@ class FlightPlotWidget(QWidget):
 
         self._is_panning = False
         self._last_mouse_pos = None
+        self._line_is_panning = False
+        self._line_last_mouse_pos = None
 
         config.get("filters", {})
         # 배경 지도는 항상 none으로 시작하며 설정을 저장하지 않는다.
@@ -92,6 +95,10 @@ class FlightPlotWidget(QWidget):
         self._color_scatter = None
         self._overlay_artists = []
         self._legend = None
+        self._actions_enabled = False
+        self.line_fig = None
+        self.line_ax = None
+        self.line_canvas = None
 
         self.initUI()
 
@@ -164,7 +171,7 @@ class FlightPlotWidget(QWidget):
         # canvas_layout.addWidget(
         #     self.createCanvasPlot(), alignment=Qt.AlignmentFlag.AlignHCenter
         # )
-        canvas_layout.addWidget(self.createCanvasPlot(), 1)
+        canvas_layout.addWidget(self.createPlotTabs(), 1)
 
         main_layout = QHBoxLayout()
         main_layout.setContentsMargins(1, 1, 1, 1)
@@ -195,11 +202,15 @@ class FlightPlotWidget(QWidget):
         self.actionDataOut.triggered.connect(self.exportKML)
 
     def actionEnable(self, action=True):
+        self._actions_enabled = action
         self.actionOpenFileBrower.setEnabled(action)
         self.actionDataCutDisp.setEnabled(action)   
         self.actionDataConfiDisp.setEnabled(action)
         self.actionDataJoinDisp.setEnabled(action)
         self.actionDataOut.setEnabled(action)
+        if hasattr(self, "plotTabs"):
+            is_line_tab = self.plotTabs.tabText(self.plotTabs.currentIndex()) == "Line"
+            self._update_line_tab_controls(is_line_tab)
 
     def _on_linecut_toggled(self, checked):
         if checked and self.actionDataJoinDisp.isChecked():
@@ -216,10 +227,15 @@ class FlightPlotWidget(QWidget):
         self._update_cursor_for_mode()
 
     def _update_cursor_for_mode(self):
-        if self.actionDataCutDisp.isChecked() or self.actionDataJoinDisp.isChecked():
-            self.canvas.setCursor(Qt.CrossCursor)
-        else:
-            self.canvas.setCursor(Qt.ArrowCursor)
+        cursor = (
+            Qt.CrossCursor
+            if self.actionDataCutDisp.isChecked() or self.actionDataJoinDisp.isChecked()
+            else Qt.ArrowCursor
+        )
+        if hasattr(self, "canvas") and self.canvas is not None:
+            self.canvas.setCursor(cursor)
+        if hasattr(self, "line_canvas") and self.line_canvas is not None:
+            self.line_canvas.setCursor(cursor)
         
     def createProjectLabel(self):
         # "프로젝트:" 텍스트를 위한 QLabel
@@ -297,6 +313,41 @@ class FlightPlotWidget(QWidget):
         layout.addWidget(self.mapTypeCombo)
         return container
 
+    def createPlotTabs(self):
+        self.plotTabs = QTabWidget()
+        self.plotTabs.addTab(self.createCanvasPlot(), "Flight")
+
+        line_tab = QWidget()
+        line_layout = QVBoxLayout(line_tab)
+        line_layout.setContentsMargins(0, 0, 0, 0)
+        line_layout.addWidget(self.createLineCanvasPlot())
+        self.plotTabs.addTab(line_tab, "Line")
+        self.plotTabs.currentChanged.connect(self._on_plot_tab_changed)
+        return self.plotTabs
+
+    def _on_plot_tab_changed(self, index):
+        is_line_tab = self.plotTabs.tabText(index) == "Line"
+        self._update_line_tab_controls(is_line_tab)
+        if is_line_tab:
+            if not self._plot_df_by_file:
+                self.updatePlot()
+            self.updateLinePlot()
+
+    def _update_line_tab_controls(self, is_line_tab):
+        if not hasattr(self, "fileListWidget"):
+            return
+        base_enabled = getattr(self, "_actions_enabled", False)
+        self.fileListWidget.setEnabled(base_enabled and not is_line_tab)
+        self.actionOpenFileBrower.setEnabled(base_enabled and not is_line_tab)
+        self.actionDataConfiDisp.setEnabled(base_enabled and not is_line_tab)
+        if not is_line_tab:
+            if self.actionDataCutDisp.isChecked():
+                self.actionDataCutDisp.setChecked(False)
+            if self.actionDataJoinDisp.isChecked():
+                self.actionDataJoinDisp.setChecked(False)
+        self.actionDataCutDisp.setEnabled(base_enabled and is_line_tab)
+        self.actionDataJoinDisp.setEnabled(base_enabled and is_line_tab)
+
     def createCanvasPlot(self):
         """Create a canvas plot using matplotlib"""
         # matplotlib plot 설정
@@ -319,6 +370,88 @@ class FlightPlotWidget(QWidget):
         self.canvas.mpl_connect("resize_event", self.on_resize)
         return self.canvas
 
+    def createLineCanvasPlot(self):
+        self.line_fig, self.line_ax = plt.subplots(figsize=(10, 8), dpi=100)
+        self.line_ax.set_title("Line Plot")
+        self.line_ax.set_xlabel("Easting (m)")
+        self.line_ax.set_ylabel("Northing (m)")
+        self.line_ax.grid(True)
+        self.line_ax.set_aspect("equal", "box")
+        self.line_fig.tight_layout()
+        self.line_canvas = FigureCanvas(self.line_fig)
+        self.line_canvas.mpl_connect("scroll_event", self._line_scroll)
+        self.line_canvas.mpl_connect("button_press_event", self._line_on_press)
+        self.line_canvas.mpl_connect("button_release_event", self._line_on_release)
+        self.line_canvas.mpl_connect("motion_notify_event", self._line_on_motion)
+        self.line_canvas.mpl_connect("resize_event", self._line_on_resize)
+        return self.line_canvas
+
+    def _line_on_resize(self, event):
+        self._fit_bounds_to_canvas_equal_on(
+            self.line_ax, self.line_canvas, margin_ratio=0.05
+        )
+
+    def _line_on_press(self, event):
+        if event.button == 1 and self._handle_line_marker(event):
+            return
+        if event.button == 1 and event.inaxes == self.line_ax:
+            if event.xdata is None or event.ydata is None:
+                return
+            self._line_is_panning = True
+            self._line_last_mouse_pos = (event.xdata, event.ydata)
+
+    def _line_on_release(self, event):
+        if event.button == 1:
+            self._line_is_panning = False
+            self._line_last_mouse_pos = None
+
+    def _line_on_motion(self, event):
+        if not self._line_is_panning or event.inaxes != self.line_ax:
+            return
+
+        if (
+            self._line_last_mouse_pos is None
+            or event.xdata is None
+            or event.ydata is None
+        ):
+            return
+
+        dx = self._line_last_mouse_pos[0] - event.xdata
+        dy = self._line_last_mouse_pos[1] - event.ydata
+
+        xlim = self.line_ax.get_xlim()
+        ylim = self.line_ax.get_ylim()
+
+        self.line_ax.set_xlim(xlim[0] + dx, xlim[1] + dx)
+        self.line_ax.set_ylim(ylim[0] + dy, ylim[1] + dy)
+
+        self._line_last_mouse_pos = (event.xdata, event.ydata)
+        self.line_canvas.draw_idle()
+
+    def _line_scroll(self, event):
+        if event.inaxes != self.line_ax:
+            return
+        if event.xdata is None or event.ydata is None:
+            return
+
+        scale_factor = 1.2 if event.button == "up" else 1 / 1.2
+        xlim = self.line_ax.get_xlim()
+        ylim = self.line_ax.get_ylim()
+
+        xdata, ydata = event.xdata, event.ydata
+        new_xlim = [
+            xdata - (xdata - xlim[0]) * scale_factor,
+            xdata + (xlim[1] - xdata) * scale_factor,
+        ]
+        new_ylim = [
+            ydata - (ydata - ylim[0]) * scale_factor,
+            ydata + (ylim[1] - ydata) * scale_factor,
+        ]
+
+        self.line_ax.set_xlim(new_xlim)
+        self.line_ax.set_ylim(new_ylim)
+        self.line_canvas.draw_idle()
+
     def on_resize(self, event):
         # self.updatePlot()
         self._fit_bounds_to_canvas_equal(margin_ratio=0.05)
@@ -332,7 +465,12 @@ class FlightPlotWidget(QWidget):
         self.on_canvas_click(event)
 
     def _handle_line_marker(self, event):
-        if event.inaxes != self.ax:
+        if not (
+            hasattr(self, "plotTabs")
+            and self.plotTabs.tabText(self.plotTabs.currentIndex()) == "Line"
+        ):
+            return False
+        if event.inaxes != self.line_ax:
             return False
         if not (
             self.actionDataCutDisp.isChecked()
@@ -1130,6 +1268,165 @@ class FlightPlotWidget(QWidget):
         )[0]
         return [line]
 
+    def _line_plot_start_x(self, df):
+        if df is None or df.empty or "X" not in df.columns:
+            return float("inf")
+        series = pd.to_numeric(df["X"], errors="coerce")
+        if series.empty:
+            return float("inf")
+        first = series.iloc[0]
+        if pd.isna(first):
+            return float("inf")
+        return float(first)
+
+    def _build_line_plot_entries(self):
+        df_by_file = self._plot_df_by_file or getattr(
+            self.db, "scanline_df_by_file", {}
+        )
+        if not df_by_file:
+            return []
+
+        groups_by_file = self._line_append_groups_by_file or getattr(
+            self.db, "scanline_groups_by_file", {}
+        )
+        intervals_by_file = self._line_intervals_by_file or getattr(
+            self.db, "scanline_intervals_by_file", {}
+        )
+        cross_groups = self._line_append_cross_groups or getattr(
+            self.db, "scanline_cross_groups", []
+        )
+
+        entries = []
+        skip_groups = set()
+
+        def group_key(group):
+            return tuple((int(start), int(end)) for start, end in group)
+
+        if cross_groups:
+            for group in cross_groups:
+                for fname, intervals in group:
+                    skip_groups.add((fname, group_key(intervals)))
+            for group in cross_groups:
+                parts = []
+                for fname, intervals in group:
+                    df = df_by_file.get(fname)
+                    if df is None or df.empty:
+                        continue
+                    work = df
+                    if "record_id" not in work.columns:
+                        work = work.copy()
+                        work["record_id"] = np.arange(len(work))
+                    record_ids = pd.to_numeric(
+                        work["record_id"], errors="coerce"
+                    ).to_numpy()
+                    if record_ids.size == 0:
+                        continue
+                    mask = np.zeros(len(work), dtype=bool)
+                    for start, end in intervals:
+                        mask |= (record_ids >= start) & (record_ids < end)
+                    g = work.loc[mask].copy()
+                    if g.empty:
+                        continue
+                    g["record_id"] = pd.to_numeric(
+                        g["record_id"], errors="coerce"
+                    )
+                    g = g.sort_values("record_id").reset_index(drop=True)
+                    parts.append(g)
+                if parts:
+                    merged = pd.concat(parts, ignore_index=True)
+                    merged = merged.sort_values("record_id").reset_index(drop=True)
+                    entries.append(merged)
+
+        for filename, df in df_by_file.items():
+            if df is None or df.empty:
+                continue
+            work = df
+            if "record_id" not in work.columns:
+                work = work.copy()
+                work["record_id"] = np.arange(len(work))
+            record_ids = pd.to_numeric(
+                work["record_id"], errors="coerce"
+            ).to_numpy()
+            if record_ids.size == 0:
+                continue
+            groups = groups_by_file.get(filename)
+            if not groups:
+                intervals = intervals_by_file.get(filename, [])
+                groups = [[interval] for interval in intervals]
+            for group in groups:
+                if not group:
+                    continue
+                if (filename, group_key(group)) in skip_groups:
+                    continue
+                mask = np.zeros(len(work), dtype=bool)
+                for start, end in group:
+                    mask |= (record_ids >= start) & (record_ids < end)
+                g = work.loc[mask].copy()
+                if g.empty:
+                    continue
+                g["record_id"] = pd.to_numeric(
+                    g["record_id"], errors="coerce"
+                )
+                g = g.sort_values("record_id").reset_index(drop=True)
+                entries.append(g)
+
+        entries.sort(key=self._line_plot_start_x)
+        return entries
+
+    def updateLinePlot(self):
+        if self.line_ax is None or self.line_canvas is None:
+            return
+
+        self.line_ax.clear()
+        line_entries = self._build_line_plot_entries()
+        if not line_entries:
+            self.line_ax.set_title("No line data to plot")
+        else:
+            colors = ("#1f77b4", "#ff7f0e")
+            for idx, df in enumerate(line_entries):
+                if not {"X", "Y"}.issubset(df.columns):
+                    continue
+                x = pd.to_numeric(df["X"], errors="coerce").to_numpy()
+                y = pd.to_numeric(df["Y"], errors="coerce").to_numpy()
+                mask = np.isfinite(x) & np.isfinite(y)
+                if not mask.any():
+                    continue
+                xs = x[mask]
+                ys = y[mask]
+                color = colors[idx % 2]
+                self.line_ax.scatter(xs, ys, s=4, color=color, zorder=3)
+                if xs.size > 1:
+                    dx = np.diff(xs)
+                    dy = np.diff(ys)
+                    valid = np.isfinite(dx) & np.isfinite(dy)
+                    if valid.any():
+                        self.line_ax.quiver(
+                            xs[:-1][valid],
+                            ys[:-1][valid],
+                            dx[valid],
+                            dy[valid],
+                            angles="xy",
+                            scale_units="xy",
+                            scale=1,
+                            pivot="tail",
+                            color=color,
+                            width=0.0025,
+                            headwidth=3,
+                            headlength=4,
+                            headaxislength=3.5,
+                            zorder=2,
+                        )
+
+        self.line_ax.ticklabel_format(useOffset=False, style="plain", axis="x")
+        self.line_ax.ticklabel_format(useOffset=False, style="plain", axis="y")
+        self.line_ax.set_title("Line Plot")
+        self.line_ax.set_xlabel("Easting (m)")
+        self.line_ax.set_ylabel("Northing (m)")
+        self.line_ax.grid(True)
+        self.line_ax.set_aspect("equal", "box")
+        self.line_fig.tight_layout()
+        self.line_canvas.draw()
+
     def updatePlot(self):
         logger.debug("updatePlot")
         cfg = config.get("filters")
@@ -1440,6 +1737,11 @@ class FlightPlotWidget(QWidget):
         # self._fit_bounds_to_canvas_equal(margin_ratio=0.05)
         self.fig.tight_layout()
         self.canvas.draw()
+        if (
+            hasattr(self, "plotTabs")
+            and self.plotTabs.tabText(self.plotTabs.currentIndex()) == "Line"
+        ):
+            self.updateLinePlot()
 
     def _fit_bounds_to_canvas_equal(self, margin_ratio=0.05):
         logger.debug("_fit_bounds_to_canvas_equal")
@@ -1483,6 +1785,37 @@ class FlightPlotWidget(QWidget):
         )
         self.ax.set_aspect("equal")
         self.canvas.draw_idle()
+
+    def _fit_bounds_to_canvas_equal_on(self, ax, canvas, margin_ratio=0.05):
+        if ax is None or canvas is None:
+            return
+        x1, x2 = ax.get_xlim()
+        y1, y2 = ax.get_ylim()
+
+        rx = max(x2 - x1, 1e-12)
+        ry = max(y2 - y1, 1e-12)
+
+        cx = (x1 + x2) * 0.5
+        cy = (y1 + y2) * 0.5
+
+        w, h = canvas.get_width_height()
+        if h <= 0:
+            h = 1
+        canvas_ratio = w / h
+
+        data_ratio = rx / ry
+        if data_ratio < canvas_ratio:
+            rx = canvas_ratio * ry
+        else:
+            ry = rx / canvas_ratio
+
+        new_x1, new_x2 = cx - rx * 0.5, cx + rx * 0.5
+        new_y1, new_y2 = cy - ry * 0.5, cy + ry * 0.5
+
+        ax.set_xlim(new_x1, new_x2)
+        ax.set_ylim(new_y1, new_y2)
+        ax.set_aspect("equal")
+        canvas.draw_idle()
 
     def updateFileList(self, files):
         """선택된 폴더의 파일 목록을 리스트 위젯에 업데이트"""
