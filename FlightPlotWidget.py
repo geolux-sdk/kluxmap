@@ -24,7 +24,15 @@ MAP_TYPE_OPTIONS = (
 
 # 파일 상단에 추가
 from PySide6.QtCore import Qt, QSettings, QSignalBlocker, Slot
-from PySide6.QtGui import QAction, QCursor, QIcon, QImage, QPixmap
+from PySide6.QtGui import (
+    QAction,
+    QCursor,
+    QIcon,
+    QImage,
+    QKeySequence,
+    QPixmap,
+    QShortcut,
+)
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QComboBox,
@@ -37,7 +45,6 @@ from PySide6.QtWidgets import (
     QListWidgetItem,
     QMenu,
     QMessageBox,
-    QStyle,
     QTabWidget,
     QToolBar,
     QVBoxLayout,
@@ -61,11 +68,11 @@ class FlightPlotWidget(QWidget):
 
         self.db: DataManager = db
 
-        self._selected_lines = []
         self._linecut_point = None
-        self._lineappend_points = []
         self._plot_df_by_file = {}
-        self._base_intervals_by_file = {}
+        self._line_base_df_by_file = {}
+        self._line_base_intervals_by_file = {}
+        self._line_plot_df_by_file = {}
         self._line_intervals_by_file = {}
         self._line_cut_points = {}
         self._line_delete_points = {}
@@ -75,6 +82,7 @@ class FlightPlotWidget(QWidget):
         self._line_append_cross_groups = []
         self._line_append_selected = []
         self._linecut_preview = None
+        self._line_undo_stack = []
         self.df = pd.DataFrame()
 
         self._is_panning = False
@@ -191,6 +199,8 @@ class FlightPlotWidget(QWidget):
         self.actionDataOut.setEnabled(False)
 
         self.connectSingnal()
+        self._line_undo_shortcut = QShortcut(QKeySequence("Ctrl+Z"), self)
+        self._line_undo_shortcut.activated.connect(self._undo_line_edit)
 
     def connectSingnal(self):
         self.actionOpenFileBrower.triggered.connect(self.openFIleBrowser)
@@ -331,7 +341,147 @@ class FlightPlotWidget(QWidget):
         if is_line_tab:
             if not self._plot_df_by_file:
                 self.updatePlot()
+            regen = QMessageBox.question(
+                self,
+                "Line Data",
+                "Regenerate Line tab data?\n(This will be a separate copy from the Flight tab.)",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.Yes,
+            )
+            if regen == QMessageBox.StandardButton.Yes:
+                if not self._regenerate_line_tab_data():
+                    QMessageBox.information(
+                        self,
+                        "Line Data",
+                        "No data available to regenerate.",
+                    )
             self.updateLinePlot()
+
+    def _reset_line_edit_state(self, clear_undo: bool = True) -> None:
+        self._line_cut_points = {}
+        self._line_delete_points = {}
+        self._line_append_links = {}
+        self._line_append_cross_links = []
+        self._line_append_groups_by_file = {}
+        self._line_append_cross_groups = []
+        self._clear_line_append_selection()
+        self._linecut_preview = None
+        self._linecut_point = None
+        if clear_undo:
+            self._line_undo_stack = []
+
+    def _snapshot_line_edit_state(self) -> dict:
+        return self._serialize_line_edit_state()
+
+    def _push_line_undo_state(self) -> None:
+        self._line_undo_stack.append(self._snapshot_line_edit_state())
+
+    def _restore_line_edit_state(self, state: dict) -> None:
+        valid_files = set(self._line_base_df_by_file)
+        if not valid_files:
+            valid_files = self._current_file_names()
+
+        self._reset_line_edit_state(clear_undo=False)
+
+        for fname, points in (state.get("cut_points") or {}).items():
+            if not valid_files or fname in valid_files:
+                self._line_cut_points[fname] = {int(p) for p in points}
+
+        for fname, points in (state.get("delete_points") or {}).items():
+            if not valid_files or fname in valid_files:
+                self._line_delete_points[fname] = {int(p) for p in points}
+
+        for fname, links in (state.get("append_links") or {}).items():
+            if not valid_files or fname in valid_files:
+                cleaned = []
+                for a, b in links:
+                    cleaned.append((int(a), int(b)))
+                self._line_append_links[fname] = cleaned
+
+        for link in state.get("append_cross_links") or []:
+            try:
+                (fa, ida), (fb, idb) = link
+            except Exception:
+                continue
+            if (not valid_files) or (fa in valid_files and fb in valid_files):
+                self._line_append_cross_links.append(
+                    ((fa, int(ida)), (fb, int(idb)))
+                )
+
+    def _undo_line_edit(self) -> None:
+        if not (
+            hasattr(self, "plotTabs")
+            and self.plotTabs.tabText(self.plotTabs.currentIndex()) == "Line"
+        ):
+            return
+        if not self._line_undo_stack:
+            return
+        state = self._line_undo_stack.pop()
+        self._restore_line_edit_state(state)
+        self._refresh_line_tab_data()
+        self._save_line_edit_state()
+        self.updateLinePlot()
+
+    def _refresh_line_tab_data(self) -> None:
+        if not self._line_base_df_by_file:
+            self._line_plot_df_by_file = {}
+            self._line_intervals_by_file = {}
+            self._line_append_groups_by_file = {}
+            self._line_append_cross_groups = []
+            self.db.update_scanline_state()
+            return
+
+        self._line_plot_df_by_file = {}
+        self._line_intervals_by_file = {}
+        for filename, base_df in self._line_base_df_by_file.items():
+            base_intervals = self._line_base_intervals_by_file.get(filename)
+            if base_intervals is None:
+                base_intervals = self.db.df_to_intervals(base_df)
+                self._line_base_intervals_by_file[filename] = base_intervals
+            edited_df, intervals, _ = self._apply_line_edits(
+                filename, base_df, base_intervals
+            )
+            self._line_intervals_by_file[filename] = intervals
+            if edited_df is None or edited_df.empty or not intervals:
+                continue
+            self._line_plot_df_by_file[filename] = edited_df
+
+        self._line_append_groups_by_file = {}
+        for filename, intervals in self._line_intervals_by_file.items():
+            links = self._line_append_links.get(filename, [])
+            self._line_append_groups_by_file[filename] = (
+                self._build_line_append_groups(intervals, links)
+            )
+        self._validate_line_append_selection()
+        self._line_append_cross_groups = self._build_cross_file_append_groups()
+        self.db.update_scanline_state(
+            df_by_file=self._line_plot_df_by_file,
+            groups_by_file=self._line_append_groups_by_file,
+            intervals_by_file=self._line_intervals_by_file,
+            cross_groups=self._line_append_cross_groups,
+        )
+
+    def _regenerate_line_tab_data(self) -> bool:
+        if not self._plot_df_by_file:
+            return False
+
+        self._line_base_df_by_file = {}
+        self._line_base_intervals_by_file = {}
+        for filename, df in self._plot_df_by_file.items():
+            if df is None or df.empty:
+                continue
+            base_df = df.copy(deep=True)
+            if "record_id" not in base_df.columns:
+                base_df["record_id"] = np.arange(len(base_df))
+            self._line_base_df_by_file[filename] = base_df
+            self._line_base_intervals_by_file[filename] = self.db.df_to_intervals(
+                base_df
+            )
+
+        self._reset_line_edit_state()
+        self._refresh_line_tab_data()
+        self._save_line_edit_state()
+        return True
 
     def _update_line_tab_controls(self, is_line_tab):
         if not hasattr(self, "fileListWidget"):
@@ -392,6 +542,14 @@ class FlightPlotWidget(QWidget):
         )
 
     def _line_on_press(self, event):
+        if (
+            event.button == 3
+            and self.actionDataJoinDisp.isChecked()
+            and self._line_append_selected
+        ):
+            self._clear_line_append_selection()
+            self.updateLinePlot()
+            return
         if event.button == 1 and self._handle_line_marker(event):
             return
         if event.button == 1 and event.inaxes == self.line_ax:
@@ -536,12 +694,13 @@ class FlightPlotWidget(QWidget):
         self._line_append_selected.append((filename, int(record_id), px, py))
 
         if len(self._line_append_selected) < 2:
-            self.updatePlot()
+            self.updateLinePlot()
             return True
 
-        self.updatePlot()
+        self.updateLinePlot()
         action = self._prompt_lineappend_action()
         if action == "done":
+            self._push_line_undo_state()
             first = self._line_append_selected[0]
             second = self._line_append_selected[1]
             if first[0] == second[0]:
@@ -554,10 +713,11 @@ class FlightPlotWidget(QWidget):
                 )
 
         self._clear_line_append_selection()
-        self.updatePlot()
         if action == "done":
+            self._refresh_line_tab_data()
             self.actionDataJoinDisp.setChecked(False)
             self._save_line_edit_state()
+        self.updateLinePlot()
         return True
 
     def _prompt_lineappend_action(self):
@@ -703,7 +863,6 @@ class FlightPlotWidget(QWidget):
 
     def _clear_line_append_selection(self):
         self._line_append_selected.clear()
-        self._lineappend_points = []
 
     def _validate_line_append_selection(self):
         if not self._line_append_selected:
@@ -725,13 +884,13 @@ class FlightPlotWidget(QWidget):
         if temporary:
             self._linecut_preview = (filename, int(record_id))
             self._linecut_point = (px, py)
-            self.updatePlot()
+            self.updateLinePlot()
         action = self._prompt_linecut_action(filename, record_id)
         if action is None:
             if temporary:
                 self._linecut_point = None
                 self._linecut_preview = None
-                self.updatePlot()
+                self.updateLinePlot()
             else:
                 self._linecut_point = None
             return True
@@ -741,6 +900,7 @@ class FlightPlotWidget(QWidget):
         record_id = int(record_id)
         changed = False
         if action == "cut":
+            self._push_line_undo_state()
             self._line_cut_points.setdefault(filename, set()).add(record_id)
             changed = True
         elif action == "delete":
@@ -754,26 +914,28 @@ class FlightPlotWidget(QWidget):
                 if temporary:
                     self._linecut_point = None
                     self._linecut_preview = None
-                    self.updatePlot()
+                    self.updateLinePlot()
                 return True
+            self._push_line_undo_state()
             self._line_delete_points.setdefault(filename, set()).add(record_id)
             changed = True
         if temporary:
             self._linecut_point = None
             self._linecut_preview = None
-        self.updatePlot()
         if changed:
+            self._refresh_line_tab_data()
             self.actionDataCutDisp.setChecked(False)
             self._save_line_edit_state()
+        self.updateLinePlot()
         return True
 
     def _find_nearest_plot_point(self, x, y):
-        if not self._plot_df_by_file:
+        if not self._line_plot_df_by_file:
             return None
 
         best = None
         best_dist = None
-        for filename, df in self._plot_df_by_file.items():
+        for filename, df in self._line_plot_df_by_file.items():
             if df is None or df.empty:
                 continue
             if not {"X", "Y"}.issubset(df.columns):
@@ -1176,6 +1338,7 @@ class FlightPlotWidget(QWidget):
                 self._line_append_cross_links.append(
                     ((fa, int(ida)), (fb, int(idb)))
                 )
+        self._line_undo_stack = []
 
     def _clear_plot_for_empty_selection(self, title: str) -> None:
         self._clear_overlay_artists()
@@ -1197,8 +1360,10 @@ class FlightPlotWidget(QWidget):
         self.ax.grid(True)
         self.canvas.draw_idle()
 
-    def _draw_line_append_overlays(self, palette):
+    def _draw_line_append_overlays(self, palette, ax=None):
         artists = []
+        if ax is None:
+            ax = self.ax
         if not self._line_append_selected:
             return artists
         drawn = set()
@@ -1211,19 +1376,18 @@ class FlightPlotWidget(QWidget):
             if group_key in drawn:
                 continue
             drawn.add(group_key)
-            df = self._plot_df_by_file.get(filename)
+            df = self._line_plot_df_by_file.get(filename)
             if df is None or df.empty:
                 continue
             if not {"X", "Y", "record_id"}.issubset(df.columns):
                 continue
             record_ids = pd.to_numeric(df["record_id"], errors="coerce").to_numpy()
-            color = palette[(idx + 1) % len(palette)]
             for start, end in group:
                 mask = (record_ids >= start) & (record_ids < end)
                 seg = df.loc[mask]
                 if seg.empty:
                     continue
-                line = self.ax.plot(
+                line = ax.plot(
                     seg["X"].values,
                     seg["Y"].values,
                     linewidth=3,
@@ -1234,9 +1398,11 @@ class FlightPlotWidget(QWidget):
                 artists.append(line)
         return artists
 
-    def _draw_linecut_preview(self):
+    def _draw_linecut_preview(self, ax=None):
         if not self._linecut_preview:
             return []
+        if ax is None:
+            ax = self.ax
         filename, record_id = self._linecut_preview
         intervals = self._line_intervals_by_file.get(filename, [])
         interval = None
@@ -1247,7 +1413,7 @@ class FlightPlotWidget(QWidget):
         if interval is None:
             return []
 
-        df = self._plot_df_by_file.get(filename)
+        df = self._line_plot_df_by_file.get(filename)
         if df is None or df.empty:
             return []
         if not {"X", "Y", "record_id"}.issubset(df.columns):
@@ -1258,7 +1424,7 @@ class FlightPlotWidget(QWidget):
         seg = df.loc[mask]
         if seg.empty:
             return []
-        line = self.ax.plot(
+        line = ax.plot(
             seg["X"].values,
             seg["Y"].values,
             linewidth=3,
@@ -1280,7 +1446,7 @@ class FlightPlotWidget(QWidget):
         return float(first)
 
     def _build_line_plot_entries(self):
-        df_by_file = self._plot_df_by_file or getattr(
+        df_by_file = self._line_plot_df_by_file or getattr(
             self.db, "scanline_df_by_file", {}
         )
         if not df_by_file:
@@ -1417,6 +1583,10 @@ class FlightPlotWidget(QWidget):
                             zorder=2,
                         )
 
+        palette = plt.get_cmap("tab10").colors
+        self._draw_linecut_preview(ax=self.line_ax)
+        self._draw_line_append_overlays(palette, ax=self.line_ax)
+
         self.line_ax.ticklabel_format(useOffset=False, style="plain", axis="x")
         self.line_ax.ticklabel_format(useOffset=False, style="plain", axis="y")
         self.line_ax.set_title("Line Plot")
@@ -1451,8 +1621,6 @@ class FlightPlotWidget(QWidget):
             all_lat, all_lon = [], []
             file_data_list = []
             self._plot_df_by_file = {}
-            self._base_intervals_by_file = {}
-            self._line_intervals_by_file = {}
             self.db.clear_combined_df()
             timeline = None
             timeline_id = "flight:plot"
@@ -1480,14 +1648,8 @@ class FlightPlotWidget(QWidget):
                 if "record_id" not in base_df.columns:
                     base_df = base_df.copy()
                     base_df["record_id"] = np.arange(len(base_df))
-                base_intervals = self.db.df_to_intervals(base_df)
-                self._base_intervals_by_file[filename] = base_intervals
-
-                edited_df, intervals, _ = self._apply_line_edits(
-                    filename, base_df, base_intervals
-                )
-                self._line_intervals_by_file[filename] = intervals
-                if edited_df is None or edited_df.empty or not intervals:
+                intervals = self.db.df_to_intervals(base_df)
+                if not intervals:
                     continue
 
                 xdata = ydata = vals = None
@@ -1513,7 +1675,7 @@ class FlightPlotWidget(QWidget):
                         logger.error(f"Segment scatter failed: {e}")
 
                 if seg_df is None or seg_df.empty:
-                    seg_df = edited_df
+                    seg_df = base_df
 
                 if xdata is None or ydata is None or vals is None:
                     xdata, ydata, vals = self.db.get_XYMagData(seg_df)
@@ -1544,21 +1706,6 @@ class FlightPlotWidget(QWidget):
                 all_y.extend(ydata)
                 all_vals.extend(vals)
 
-            self._line_append_groups_by_file = {}
-            for filename, intervals in self._line_intervals_by_file.items():
-                links = self._line_append_links.get(filename, [])
-                self._line_append_groups_by_file[filename] = (
-                    self._build_line_append_groups(intervals, links)
-                )
-            self._validate_line_append_selection()
-            self._line_append_cross_groups = self._build_cross_file_append_groups()
-            self.db.update_scanline_state(
-                df_by_file=self._plot_df_by_file,
-                groups_by_file=self._line_append_groups_by_file,
-                intervals_by_file=self._line_intervals_by_file,
-                cross_groups=self._line_append_cross_groups,
-            )
-
             self.df = self.db.combined_df
             if len(all_x) == 0:
                 self._clear_plot_for_empty_selection("No data to plot.")
@@ -1578,8 +1725,6 @@ class FlightPlotWidget(QWidget):
                     all_lat, all_lon, data_epsg=data_epsg
                 )
 
-            if map_drawn and self._map_extent:
-                map_minx, map_maxx, map_miny, map_maxy = self._map_extent
             data_minx, data_maxx, data_miny, data_maxy = self.clac_XYlimit_listAll()
             # 축은 항상 데이터 범위에 맞추어 배경 없음 상태와 동일한 크기로 시작
             # 배경 이미지가 더 크더라도 imshow extent가 지도 전체를 포함하므로 확대/이동 시 모두 볼 수 있음
@@ -1700,25 +1845,21 @@ class FlightPlotWidget(QWidget):
             # ployline
             self._clear_overlay_artists()
             overlay_artists = []
-            if self._selected_lines:
-                for _, line in enumerate(self._selected_lines):
-                    start, end = line
-                    xs = self.df["X"].iloc[start : end + 1].values
-                    ys = self.df["Y"].iloc[start : end + 1].values
-                    overlay_line = self.ax.plot(
-                        xs, ys, linewidth=3, c="black", zorder=5
-                    )[0]
-                    overlay_artists.append(overlay_line)
 
-            overlay_artists.extend(self._draw_linecut_preview())
-            overlay_artists.extend(self._draw_line_append_overlays(palette))
+            is_line_tab = (
+                hasattr(self, "plotTabs")
+                and self.plotTabs.tabText(self.plotTabs.currentIndex()) == "Line"
+            )
+            if is_line_tab:
+                overlay_artists.extend(self._draw_linecut_preview())
+                overlay_artists.extend(self._draw_line_append_overlays(palette))
 
-            if self._linecut_point:
-                x, y = self._linecut_point
-                point = self.ax.scatter(
-                    [x], [y], s=40, marker="x", color="red", zorder=10
-                )
-                overlay_artists.append(point)
+                if self._linecut_point:
+                    x, y = self._linecut_point
+                    point = self.ax.scatter(
+                        [x], [y], s=40, marker="x", color="red", zorder=10
+                    )
+                    overlay_artists.append(point)
             self._overlay_artists = overlay_artists
             # 오프셋 모드 끄기 → 절대값 그대로 표시
             self.ax.ticklabel_format(useOffset=False, style="plain", axis="x")
@@ -2003,21 +2144,16 @@ class FlightPlotWidget(QWidget):
     def delete_all_items(self):
         self.fileListWidget.clear()
         self.db.clear_FlightData()
-        self._line_cut_points.clear()
-        self._line_delete_points.clear()
         self._plot_df_by_file.clear()
-        self._base_intervals_by_file.clear()
+        self._line_base_df_by_file.clear()
+        self._line_base_intervals_by_file.clear()
+        self._line_plot_df_by_file.clear()
         self._line_intervals_by_file.clear()
-        self._line_append_links.clear()
-        self._line_append_cross_links.clear()
-        self._line_append_groups_by_file.clear()
-        self._line_append_cross_groups.clear()
-        self._line_append_selected.clear()
-        self._linecut_preview = None
-        self._linecut_point = None
-        self._lineappend_points = []
+        self._reset_line_edit_state()
+        self._refresh_line_tab_data()
         self._save_line_edit_state()
         self.updatePlot()
+        self.updateLinePlot()
 
     def on_canvas_click(self, event):
         """Handle clicks on the canvas, specifically on the colorbar."""
@@ -2081,7 +2217,7 @@ class FlightPlotWidget(QWidget):
     def show_map_context_menu(self):
         menu = QMenu(self)
         actions = {
-            "배경 없음": "none",
+            "None": "none",
             "roadmap": "roadmap",
             "satellite": "satellite",
             "hybrid": "hybrid",

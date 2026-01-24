@@ -604,8 +604,8 @@ class CalibrationFlightWidget(QWidget):
             if len(self._selected_lines) >= 4:
                 QMessageBox.information(
                     self,
-                    "선택 제한",
-                    "비행 라인은 최대 4개까지만 선택할 수 있습니다.",
+                    "Selection Limit",
+                    "You can select up to 4 flight lines.",
                 )
                 return
             x0, y0 = event.xdata, event.ydata
