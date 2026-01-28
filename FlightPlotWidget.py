@@ -83,6 +83,7 @@ class FlightPlotWidget(QWidget):
         self._line_append_selected = []
         self._linecut_preview = None
         self._line_undo_stack = []
+        self._line_redo_stack = []
         self.df = pd.DataFrame()
 
         self._is_panning = False
@@ -201,6 +202,8 @@ class FlightPlotWidget(QWidget):
         self.connectSingnal()
         self._line_undo_shortcut = QShortcut(QKeySequence("Ctrl+Z"), self)
         self._line_undo_shortcut.activated.connect(self._undo_line_edit)
+        self._line_redo_shortcut = QShortcut(QKeySequence("Ctrl+Y"), self)
+        self._line_redo_shortcut.activated.connect(self._redo_line_edit)
 
     def connectSingnal(self):
         self.actionOpenFileBrower.triggered.connect(self.openFIleBrowser)
@@ -369,12 +372,14 @@ class FlightPlotWidget(QWidget):
         self._linecut_point = None
         if clear_undo:
             self._line_undo_stack = []
+            self._line_redo_stack = []
 
     def _snapshot_line_edit_state(self) -> dict:
         return self._serialize_line_edit_state()
 
     def _push_line_undo_state(self) -> None:
         self._line_undo_stack.append(self._snapshot_line_edit_state())
+        self._line_redo_stack = []
 
     def _restore_line_edit_state(self, state: dict) -> None:
         valid_files = set(self._line_base_df_by_file)
@@ -416,7 +421,25 @@ class FlightPlotWidget(QWidget):
             return
         if not self._line_undo_stack:
             return
+        current_state = self._snapshot_line_edit_state()
         state = self._line_undo_stack.pop()
+        self._line_redo_stack.append(current_state)
+        self._restore_line_edit_state(state)
+        self._refresh_line_tab_data()
+        self._save_line_edit_state()
+        self.updateLinePlot()
+
+    def _redo_line_edit(self) -> None:
+        if not (
+            hasattr(self, "plotTabs")
+            and self.plotTabs.tabText(self.plotTabs.currentIndex()) == "Line"
+        ):
+            return
+        if not self._line_redo_stack:
+            return
+        current_state = self._snapshot_line_edit_state()
+        state = self._line_redo_stack.pop()
+        self._line_undo_stack.append(current_state)
         self._restore_line_edit_state(state)
         self._refresh_line_tab_data()
         self._save_line_edit_state()
@@ -1339,6 +1362,7 @@ class FlightPlotWidget(QWidget):
                     ((fa, int(ida)), (fb, int(idb)))
                 )
         self._line_undo_stack = []
+        self._line_redo_stack = []
 
     def _clear_plot_for_empty_selection(self, title: str) -> None:
         self._clear_overlay_artists()
@@ -1986,17 +2010,26 @@ class FlightPlotWidget(QWidget):
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No,
         )
-        # 사용자가 Yes를 선택한 경우
-        if user_response == QMessageBox.StandardButton.Yes:
-            # 버텍스 출력
+        apply_area = user_response == QMessageBox.StandardButton.Yes
+        if apply_area:
             for idx, (x, y) in enumerate(points):
                 logger.debug(f"Vertex {idx}: {x:.6f}, {y:.6f}")
-            # self.polygonDrawer.disconnect()
-            self.polygonDrawer.clear()
             config.set("bound_area_points", points, save=True)
+        self.polygonDrawer.clear()
+        self.polygonDrawer.enable(False)
+        self._is_panning = False
+        self._last_mouse_pos = None
+
+        filters = config.get("filters", {}) or {}
+        filters.setdefault("enable_area_bound", False)
+        filters.setdefault("show_area_bound", False)
+        filters["enable_area_bound"] = False
+        if apply_area:
+            filters["show_area_bound"] = True
+        config.set("filters", filters, save=True)
+
+        if apply_area:
             self.updatePlot()
-        else:
-            self.polygonDrawer.clear()
 
     def load_bound_file(self, file_path):
         logger.debug(f"load_bound_file {file_path}")
