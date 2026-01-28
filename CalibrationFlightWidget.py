@@ -8,7 +8,7 @@ import pandas as pd
 from loguru import logger
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
-from PySide6.QtCore import Qt, Slot
+from PySide6.QtCore import Qt, QSize, Slot
 from PySide6.QtGui import QAction, QIcon
 from PySide6.QtWidgets import (
     QApplication,
@@ -60,6 +60,7 @@ class CalibrationFlightWidget(QWidget):
 
         # Toolbar
         toolbar = QToolBar(self)
+        toolbar.setIconSize(QSize(32, 32))
         self.actionOpenCaliFolder = QAction(
             QIcon(resource_path("imag_data_import.png")),
             "Open Calibration Flight Folder..",

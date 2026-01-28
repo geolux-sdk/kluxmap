@@ -23,7 +23,7 @@ MAP_TYPE_OPTIONS = (
 )
 
 # 파일 상단에 추가
-from PySide6.QtCore import Qt, QSettings, QSignalBlocker, Slot
+from PySide6.QtCore import Qt, QSize, QSettings, QSignalBlocker, Slot
 from PySide6.QtGui import (
     QAction,
     QCursor,
@@ -115,6 +115,7 @@ class FlightPlotWidget(QWidget):
         layout = QVBoxLayout()
         # Toolbar
         toolbar = QToolBar(self)
+        toolbar.setIconSize(QSize(32, 32))
 
         self.actionOpenFileBrower = QAction(
             QIcon(resource_path("imag_data_import.png")),

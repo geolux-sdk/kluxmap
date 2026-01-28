@@ -9,7 +9,7 @@ from loguru import logger
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 
 # 파일 상단에 추가
-from PySide6.QtCore import Qt, Slot
+from PySide6.QtCore import Qt, QSize, Slot
 from PySide6.QtGui import QAction, QIcon
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -70,6 +70,7 @@ class LinePlotWidget(QWidget):
         layout = QVBoxLayout()
         # 페이지 전용 툴바
         toolbar = QToolBar()
+        toolbar.setIconSize(QSize(32, 32))
 
         self.actionDataConfiDisp = QAction(
             QIcon(resource_path("filter.png")), "Filter", self
