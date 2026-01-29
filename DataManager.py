@@ -191,6 +191,10 @@ class DataManager:
                 df = self.filter_cardinal_directions(
                     df, settings["direction_filter"].get("threshold", 5), degree=degree
                 )
+                # 구간별 시작-끝 각도도 동일 허용 범위 내인지 확인 후 제외
+                df = self.filter_intervals_by_endpoint_angle(
+                    df, settings["direction_filter"].get("threshold", 5), degree=degree
+                )
             if df.empty:
                 logger.warning("Filtered DataFrame is empty.")
                 return None
@@ -921,6 +925,58 @@ class DataManager:
                 mask |= (directions >= lower) | (directions <= upper)
 
         return df[mask.fillna(False)].copy()
+
+    def filter_intervals_by_endpoint_angle(
+        self, df: pd.DataFrame, tolerance_deg: float = 5.0, degree=0
+    ) -> pd.DataFrame:
+        """
+        direction 필터 후, 연속 record_id 구간별로 시작-끝 벡터의 각도를 확인하여
+        기준 방향(tolerance 범위) 밖이면 해당 구간 전체를 제거한다.
+        """
+        if df is None or df.empty or not {"X", "Y"}.issubset(df.columns):
+            return df
+
+        work = df.copy()
+        if "record_id" not in work.columns:
+            work["record_id"] = np.arange(len(work))
+        work["record_id"] = pd.to_numeric(work["record_id"], errors="coerce")
+
+        intervals = self.df_to_intervals(work)
+        if not intervals:
+            return work.iloc[0:0]
+
+        targets = [0 + degree, 90 + degree, 180 + degree, 270 + degree]
+
+        def ang_diff(a, b):
+            d = abs(a - b) % 360.0
+            return min(d, 360.0 - d)
+
+        keep_masks = []
+        for start, end in intervals:
+            mask = (work["record_id"] >= start) & (work["record_id"] < end)
+            seg = work.loc[mask]
+            if seg.empty:
+                continue
+            try:
+                sx, sy = float(seg["X"].iloc[0]), float(seg["Y"].iloc[0])
+                ex, ey = float(seg["X"].iloc[-1]), float(seg["Y"].iloc[-1])
+            except Exception:
+                continue
+            dx = ex - sx
+            dy = ey - sy
+            if dx == 0 and dy == 0:
+                continue
+            angle = (np.degrees(np.arctan2(dx, dy)) + 360.0) % 360.0
+            if any(ang_diff(angle, tgt) <= tolerance_deg for tgt in targets):
+                keep_masks.append(mask)
+
+        if not keep_masks:
+            return work.iloc[0:0]
+
+        final_mask = keep_masks[0].copy()
+        for m in keep_masks[1:]:
+            final_mask |= m
+        return work.loc[final_mask].copy()
 
     def filter_by_speed_using_counter(
         self, df: pd.DataFrame, target_speed: float, tolerance: float = 0.1

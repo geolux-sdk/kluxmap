@@ -100,6 +100,7 @@ class FlightPlotWidget(QWidget):
         self._last_epsg = None
         self._map_cache: dict = {}
         self._map_artist = None
+        self._line_map_artist = None
         self._scatter_by_file = {}
         self._color_scatter = None
         self._overlay_artists = []
@@ -108,6 +109,9 @@ class FlightPlotWidget(QWidget):
         self.line_fig = None
         self.line_ax = None
         self.line_canvas = None
+
+        self._line_plot_state_hash = None
+        self._line_base_state_hash = None
 
         self.initUI()
 
@@ -345,20 +349,25 @@ class FlightPlotWidget(QWidget):
         if is_line_tab:
             if not self._plot_df_by_file:
                 self.updatePlot()
-            regen = QMessageBox.question(
-                self,
-                "Line Data",
-                "Regenerate Line tab data?\n(This will be a separate copy from the Flight tab.)",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                QMessageBox.StandardButton.Yes,
+            needs_regen = (
+                self._line_plot_state_hash is not None
+                and self._line_base_state_hash != self._line_plot_state_hash
             )
-            if regen == QMessageBox.StandardButton.Yes:
-                if not self._regenerate_line_tab_data():
-                    QMessageBox.information(
-                        self,
-                        "Line Data",
-                        "No data available to regenerate.",
-                    )
+            if needs_regen:
+                regen = QMessageBox.question(
+                    self,
+                    "Line Data",
+                    "Regenerate Line tab data?\n(This will be a separate copy from the Flight tab.)",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                    QMessageBox.StandardButton.Yes,
+                )
+                if regen == QMessageBox.StandardButton.Yes:
+                    if not self._regenerate_line_tab_data():
+                        QMessageBox.information(
+                            self,
+                            "Line Data",
+                            "No data available to regenerate.",
+                        )
             self.updateLinePlot()
 
     def _reset_line_edit_state(self, clear_undo: bool = True) -> None:
@@ -485,7 +494,7 @@ class FlightPlotWidget(QWidget):
             cross_groups=self._line_append_cross_groups,
         )
 
-    def _regenerate_line_tab_data(self) -> bool:
+    def _regenerate_line_tab_data(self, reset_state: bool = True) -> bool:
         if not self._plot_df_by_file:
             return False
 
@@ -502,9 +511,12 @@ class FlightPlotWidget(QWidget):
                 base_df
             )
 
-        self._reset_line_edit_state()
+        if reset_state:
+            self._reset_line_edit_state()
         self._refresh_line_tab_data()
-        self._save_line_edit_state()
+        if reset_state:
+            self._save_line_edit_state()
+        self._line_base_state_hash = self._line_plot_state_hash
         return True
 
     def _update_line_tab_controls(self, is_line_tab):
@@ -1260,34 +1272,110 @@ class FlightPlotWidget(QWidget):
                 f.write('<kml xmlns="http://www.opengis.net/kml/2.2">\n')
                 f.write("  <Document>\n")
                 f.write("    <name>Flight Plot</name>\n")
+                # Line 스타일
+                f.write(
+                    "    <Style id=\"lineStyle\">"
+                    "<LineStyle><color>ff0000ff</color><width>3</width></LineStyle>"
+                    "</Style>\n"
+                )
+                # Point 스타일
+                f.write(
+                    "    <Style id=\"ptStyle\">"
+                    "<IconStyle><scale>0.7</scale>"
+                    "<Icon><href>http://maps.google.com/mapfiles/kml/shapes/placemark_circle.png</href></Icon>"
+                    "</IconStyle>"
+                    "</Style>\n"
+                )
 
-                for fname, df in self._plot_df_by_file.items():
-                    if df is None or df.empty:
-                        continue
-                    lats, lons, alts = self._extract_latlon_alt(df)
-                    if lats is None or lons is None:
-                        logger.warning(
-                            f"Export KML: missing lat/lon for {fname}, skipping."
-                        )
-                        continue
-                    f.write(f"    <Folder><name>{escape(str(fname))}</name>\n")
-                    for idx, (lat, lon) in enumerate(zip(lats, lons)):
-                        if np.isnan(lat) or np.isnan(lon):
+                # 어느 탭에서 저장하는지에 따라 데이터 소스 선택
+                use_line_tab = (
+                    hasattr(self, "plotTabs")
+                    and self.plotTabs.tabText(self.plotTabs.currentIndex()) == "Line"
+                    and bool(self._line_plot_df_by_file)
+                )
+                if use_line_tab:
+                    line_entries = self._build_line_plot_entries()
+                    for df in line_entries:
+                        if df is None or df.empty:
                             continue
-                        alt = 0.0
-                        if alts is not None:
-                            alt_val = alts[idx]
-                            if not np.isnan(alt_val):
-                                alt = float(alt_val)
-                        f.write("      <Placemark>\n")
-                        f.write(
-                            "        <Point><coordinates>"
-                            f"{float(lon)},{float(lat)},{alt}"
-                            "</coordinates></Point>\n"
-                        )
-                        f.write("      </Placemark>\n")
-                        total_points += 1
-                    f.write("    </Folder>\n")
+                        lats, lons, alts = self._extract_latlon_alt(df)
+                        if lats is None or lons is None:
+                            continue
+                        coords = []
+                        for lat, lon, alt_val in zip(
+                            np.asarray(lats),
+                            np.asarray(lons),
+                            np.asarray(alts) if alts is not None else np.zeros(len(lats)),
+                        ):
+                            if np.isnan(lat) or np.isnan(lon):
+                                continue
+                            alt = 0.0 if np.isnan(alt_val) else float(alt_val)
+                            coords.append(f"{float(lon)},{float(lat)},{alt}")
+                        if coords:
+                            f.write("      <Placemark>\n")
+                            f.write("        <styleUrl>#lineStyle</styleUrl>\n")
+                            f.write("        <tessellate>1</tessellate>\n")
+                            f.write("        <LineString>\n")
+                            f.write("          <tessellate>1</tessellate>\n")
+                            f.write("          <coordinates>\n")
+                            f.write("            " + " ".join(coords) + "\n")
+                            f.write("          </coordinates>\n")
+                            f.write("        </LineString>\n")
+                            f.write("      </Placemark>\n")
+                            total_points += len(coords)
+                else:
+                    df_by_file = self._plot_df_by_file
+                    for fname, df in df_by_file.items():
+                        if df is None or df.empty:
+                            continue
+                        lats, lons, alts = self._extract_latlon_alt(df)
+                        if lats is None or lons is None:
+                            logger.warning(
+                                f"Export KML: missing lat/lon for {fname}, skipping."
+                            )
+                            continue
+
+                        work = df
+                        if "record_id" not in work.columns:
+                            work = work.copy()
+                            work["record_id"] = np.arange(len(work))
+                        record_ids = pd.to_numeric(
+                            work["record_id"], errors="coerce"
+                        ).to_numpy()
+                        intervals = self.db.df_to_intervals(work)
+
+                        arr_lats = np.asarray(lats)
+                        arr_lons = np.asarray(lons)
+                        arr_alts = np.asarray(alts) if alts is not None else None
+
+                        for start, end in intervals:
+                            mask = (record_ids >= start) & (record_ids < end)
+                            if not mask.any():
+                                continue
+                            coords = []
+                            for lat, lon, alt_val in zip(
+                                arr_lats[mask],
+                                arr_lons[mask],
+                                arr_alts[mask] if arr_alts is not None else np.zeros(mask.sum()),
+                            ):
+                                if np.isnan(lat) or np.isnan(lon):
+                                    continue
+                                alt = 0.0
+                                if not np.isnan(alt_val):
+                                    alt = float(alt_val)
+                                coords.append(f"{float(lon)},{float(lat)},{alt}")
+                            if coords:
+                                f.write("      <Placemark>\n")
+                                f.write("        <styleUrl>#lineStyle</styleUrl>\n")
+                                f.write("        <tessellate>1</tessellate>\n")
+                                f.write("        <LineString>\n")
+                                f.write("          <tessellate>1</tessellate>\n")
+                                f.write("          <coordinates>\n")
+                                f.write("            " + " ".join(coords) + "\n")
+                                f.write("          </coordinates>\n")
+                                f.write("        </LineString>\n")
+                                f.write("      </Placemark>\n")
+                                total_points += len(coords)
 
                 f.write("  </Document>\n")
                 f.write("</kml>\n")
@@ -1364,6 +1452,16 @@ class FlightPlotWidget(QWidget):
                 )
         self._line_undo_stack = []
         self._line_redo_stack = []
+
+    def _ensure_line_tab_state_restored(self) -> None:
+        if not self._plot_df_by_file:
+            return
+        if self._line_plot_state_hash is None:
+            return
+        if self._line_base_state_hash == self._line_plot_state_hash:
+            return
+        if self._regenerate_line_tab_data(reset_state=False):
+            self.updateLinePlot()
 
     def _clear_plot_for_empty_selection(self, title: str) -> None:
         self._clear_overlay_artists()
@@ -1569,6 +1667,26 @@ class FlightPlotWidget(QWidget):
             return
 
         self.line_ax.clear()
+
+        # Flight 탭에서 받아둔 배경 지도 이미지를 Line 탭에도 표시
+        self._line_map_artist = None
+        if (
+            self.map_type
+            and self.map_type != "none"
+            and self._map_image is not None
+            and self._map_extent is not None
+        ):
+            try:
+                self._line_map_artist = self.line_ax.imshow(
+                    self._map_image,
+                    extent=self._map_extent,
+                    origin="upper",
+                    zorder=0,
+                    aspect="equal",
+                )
+            except Exception as e:
+                logger.warning(f"Line map draw failed: {e}")
+
         line_entries = self._build_line_plot_entries()
         if not line_entries:
             self.line_ax.set_title("No line data to plot")
@@ -1611,6 +1729,9 @@ class FlightPlotWidget(QWidget):
         palette = plt.get_cmap("tab10").colors
         self._draw_linecut_preview(ax=self.line_ax)
         self._draw_line_append_overlays(palette, ax=self.line_ax)
+        if self.actionDataCutDisp.isChecked() and self._linecut_point:
+            x, y = self._linecut_point
+            self.line_ax.scatter([x], [y], s=40, marker="x", color="red", zorder=10)
 
         self.line_ax.ticklabel_format(useOffset=False, style="plain", axis="x")
         self.line_ax.ticklabel_format(useOffset=False, style="plain", axis="y")
@@ -1732,6 +1853,17 @@ class FlightPlotWidget(QWidget):
                 all_vals.extend(vals)
 
             self.df = self.db.combined_df
+            hash_items = [
+                (fname, len(df) if df is not None else 0)
+                for fname, df in self._plot_df_by_file.items()
+            ]
+            new_hash = tuple(sorted(hash_items)) if hash_items else None
+            previous_hash = self._line_plot_state_hash
+            if new_hash != previous_hash:
+                self._line_plot_state_hash = new_hash
+                self._line_base_state_hash = None
+            else:
+                self._line_plot_state_hash = new_hash
             if len(all_x) == 0:
                 self._clear_plot_for_empty_selection("No data to plot.")
                 return
@@ -1879,7 +2011,7 @@ class FlightPlotWidget(QWidget):
                 overlay_artists.extend(self._draw_linecut_preview())
                 overlay_artists.extend(self._draw_line_append_overlays(palette))
 
-                if self._linecut_point:
+                if self.actionDataCutDisp.isChecked() and self._linecut_point:
                     x, y = self._linecut_point
                     point = self.ax.scatter(
                         [x], [y], s=40, marker="x", color="red", zorder=10
@@ -2183,6 +2315,8 @@ class FlightPlotWidget(QWidget):
         self._line_base_intervals_by_file.clear()
         self._line_plot_df_by_file.clear()
         self._line_intervals_by_file.clear()
+        self._line_plot_state_hash = None
+        self._line_base_state_hash = None
         self._reset_line_edit_state()
         self._refresh_line_tab_data()
         self._save_line_edit_state()
@@ -2212,6 +2346,7 @@ class FlightPlotWidget(QWidget):
         self.initialize()
         self._load_line_edit_state()
         self.updatePlot()
+        self._ensure_line_tab_state_restored()
 
     @Slot()
     def on_project_reset(self):
