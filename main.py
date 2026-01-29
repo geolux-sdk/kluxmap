@@ -10,7 +10,7 @@ from PySide6.QtWidgets import QApplication, QSplashScreen
 
 from mainWindow import KLuxMap, resource_path
 
-TITLE = "KLuxMap V1.0.1"
+TITLE = "KLuxMap V1.0.2"
 APP_NAME = "KLuxMap"
 APP_DIR = Path.home() / f".{APP_NAME}"
 LOG_DIR = APP_DIR / "log"
