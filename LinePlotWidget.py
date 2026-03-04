@@ -125,12 +125,14 @@ class LinePlotWidget(QWidget):
             self.createScatterPlot()
         )  # 체크박스 아래에 스캐터 플롯 추가
 
-        data_layout.addWidget(scatter_container, 1)
-        data_layout.setStretch(0, 1)
-        data_layout.setStretch(1, 1)
+        data_layout.addWidget(scatter_container, 12)
+        # 테이블:스캐터 가로 비율을 1:1.2로 조정
+        data_layout.setStretch(0, 10)
+        data_layout.setStretch(1, 12)
 
         dataV_layout = QVBoxLayout()
-        dataV_layout.addLayout(data_layout, 1)
+        # 상단(테이블+스캐터):하단 그래프 비율을 2:1로 조정해 하단 높이를 2/3 수준으로 축소
+        dataV_layout.addLayout(data_layout, 2)
         dataV_layout.addWidget(self.createCanvasPlot(), 1)
 
         data_panel = QFrame()
@@ -162,7 +164,8 @@ class LinePlotWidget(QWidget):
         DataFilterDialog(self).exec()
 
     def createScatterPlot(self):
-        self.scatter_fig, self.scatter_ax = plt.subplots(figsize=(6, 2), dpi=100)
+        # scatter plot을 더 크게 보기 위해 figsize 및 최소 높이를 확장
+        self.scatter_fig, self.scatter_ax = plt.subplots(figsize=(8, 4), dpi=100)
         self.scatter_ax.set_title("Mag Value (Sensor_Total)")
         self.scatter_ax.set_xlabel("Index")
         self.scatter_ax.set_ylabel("Sensor_Total")
@@ -171,6 +174,7 @@ class LinePlotWidget(QWidget):
         self.scatter_canvas.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
         )
+        self.scatter_canvas.setMinimumHeight(300)
         return self.scatter_canvas
 
     def createCanvasPlot(self):
@@ -201,7 +205,7 @@ class LinePlotWidget(QWidget):
     def createTableWidget(self):
         self.tableWidget = QTableWidget()
         self.tableWidget.setSelectionBehavior(
-            QAbstractItemView.SelectionBehavior.SelectColumns  # ← 행 단위에서 셀 단위로 변경
+            QAbstractItemView.SelectionBehavior.SelectColumns  # 행 단위 선택에서 열 단위 선택으로 변경
         )
         self.tableWidget.setSelectionMode(
             QAbstractItemView.SelectionMode.SingleSelection
@@ -247,17 +251,17 @@ class LinePlotWidget(QWidget):
             scanline_df (dict[str, pd.DataFrame]): key=이름, value=DataFrame
 
         Returns:
-            tuple: (ns_avg, sn_avg, diff)
+            dict: offset_TD/BU/LR/RL 값을 담은 딕셔너리
         """
 
         cali = config.get(
             "cali_filter",
             {
                 "enabled": False,
-                "offset_E_W": 0.0,
-                "offset_W_E": 0.0,
-                "offset_N_S": 0.0,
-                "offset_S_N": 0.0,
+                "offset_RL": 0.0,
+                "offset_LR": 0.0,
+                "offset_TD": 0.0,
+                "offset_BU": 0.0,
             },
         )
 
@@ -267,53 +271,50 @@ class LinePlotWidget(QWidget):
             config.set_subvalue("filters_line", "cali_filter", cali)
             return None, None, None
 
-        # candidate_fields = ["Sensor_X", "Sensor_Y", "Sensor_Z", "Mag"]
-        candidate_fields = ["Mag"]
-        result_diff = {}
-        ns_avg = sn_avg = diff = None  # ← 미리 정의해 UnboundLocalError 방지
+        # 평균 Mag을 방향별(TD/BU/LR/RL)로 계산
+        sums = {"TD": 0.0, "BU": 0.0, "LR": 0.0, "RL": 0.0}
+        counts = {"TD": 0, "BU": 0, "LR": 0, "RL": 0}
 
-        for field in candidate_fields:
-            ns_sum = ns_count = 0
-            sn_sum = sn_count = 0
-            for name, df in self.scanline_df.items():
-                if df.empty:
-                    continue
+        for name, df in self.scanline_df.items():
+            if df.empty or not {"Mag", "X", "Y"}.issubset(df.columns):
+                continue
 
-                if field not in df.columns:  # 필드가 없으면 건너뛰기
-                    continue
+            mag_avg = float(df["Mag"].mean())
+            dx = df["X"].iloc[-1] - df["X"].iloc[0]
+            dy = df["Y"].iloc[-1] - df["Y"].iloc[0]
 
-                mag_avg = float(df[field].mean())
-
-                # Y 증가 → S_N, Y 감소 → N_S
-                if df["Y"].iloc[-1] > df["Y"].iloc[0]:
-                    sn_sum += mag_avg
-                    sn_count += 1
-                else:
-                    ns_sum += mag_avg
-                    ns_count += 1
-
-            # 각 필드별 평균 차이 계산
-            if ns_count > 0 and sn_count > 0:
-                ns_avg = ns_sum / ns_count
-                sn_avg = sn_sum / sn_count
-                diff = round(ns_avg - sn_avg, 2)
-                result_diff[field] = diff
+            if abs(dx) >= abs(dy):
+                direction = "LR" if dx > 0 else "RL"
             else:
-                logger.debug(f"Field {field} skipped (not enough data)")
+                direction = "BU" if dy > 0 else "TD"
 
-        cali["offset_S_N"] = result_diff["Mag"]
-        cali["offset_N_S"] = 0.0
-        cali["offset_E_W"] = 0.0
-        cali["offset_W_E"] = 0.0
+            sums[direction] += mag_avg
+            counts[direction] += 1
 
-        # if "Sensor_X" in result_diff:
-        #     self.calibration_data["offset_Sensor_X"] = result_diff["Sensor_X"]
-        #     self.calibration_data["offset_Sensor_Y"] = result_diff["Sensor_Y"]
-        #     self.calibration_data["offset_Sensor_Z"] = result_diff["Sensor_Z"]
+        offsets = {"offset_TD": 0.0, "offset_BU": 0.0, "offset_LR": 0.0, "offset_RL": 0.0}
 
+        if counts["TD"] > 0 and counts["BU"] > 0:
+            td_avg = sums["TD"] / counts["TD"]
+            bu_avg = sums["BU"] / counts["BU"]
+            diff_v = td_avg - bu_avg
+            offsets["offset_TD"] = -diff_v / 2.0
+            offsets["offset_BU"] = diff_v / 2.0
+        else:
+            logger.debug("Vertical calibration skipped (not enough TD/BU data)")
+
+        if counts["LR"] > 0 and counts["RL"] > 0:
+            lr_avg = sums["LR"] / counts["LR"]
+            rl_avg = sums["RL"] / counts["RL"]
+            diff_h = lr_avg - rl_avg
+            offsets["offset_LR"] = -diff_h / 2.0
+            offsets["offset_RL"] = diff_h / 2.0
+        else:
+            logger.debug("Horizontal calibration skipped (not enough LR/RL data)")
+
+        cali.update(offsets)
         config.set_subvalue("filters_line", "cali_filter", cali)
         logger.debug(f"save calibration data {self.calibration_data}")
-        return ns_avg, sn_avg, diff
+        return offsets
 
     def updateFileList(self, file_paths):
         logger.debug("updateFileList")
@@ -333,7 +334,7 @@ class LinePlotWidget(QWidget):
                 self.scanline_df[name_wo_ext] = df
                 self.scanline_filepaths[name_wo_ext] = file_path
 
-        # 🔵 첫 번째 항목 자동 선택 및 로드
+        # 첫 번째 항목 자동 선택 및 로드
         if self.fileListWidget.count() > 0:
             first_item = self.fileListWidget.item(0)
             first_item.setSelected(True)
@@ -344,106 +345,103 @@ class LinePlotWidget(QWidget):
 
     def update_scatterplot(self):
         logger.debug("update_scatterplot")
-        self.scatter_fig.clear()  # 전체 Figure를 클리어하여 레이아웃 문제를 근본적으로 해결
-        self.scatter_ax = self.scatter_fig.add_subplot(111)  # 서브플롯을 다시 추가
+        self._reset_scatter_axes()
 
         if not self.scanline_df:
             self.scatter_ax.set_title("No Scanline Data")
+            self.scatter_canvas.draw()
+            return
 
         val_col = self.selected_col_name
-        if self.scatter_colorbar_cb.isChecked():
-            if self.selected_col_name not in [
-                "Mag",
-                "Mag_median",
-                "Mag_lowpass",
-                "Mag_calibrated",
-            ]:
-                val_col = "Mag"
+        colorbar_mode = self.scatter_colorbar_cb.isChecked()
 
-            # --- COLORBAR MODE ---
-            cmap = plt.get_cmap("jet")
-
-            all_x, all_y, all_vals = [], [], []
-            for df in self.scanline_df.values():
-                if {"X", "Y", val_col}.issubset(df.columns):
-                    all_x.extend(df["X"])
-                    all_y.extend(df["Y"])
-                    all_vals.extend(df[val_col])
-
-            if all_x:
-                sc = self.scatter_ax.scatter(all_x, all_y, c=all_vals, cmap=cmap, s=10)
-                self.scatter_colorbar = self.scatter_fig.colorbar(
-                    sc, ax=self.scatter_ax, label="Value"
-                )
-                self.scatter_colorbar.ax.ticklabel_format(
-                    useOffset=False, style="plain"
-                )
+        if colorbar_mode:
+            val_col = self._draw_colorbar_mode(val_col)
         else:
-            for idx, (key, df) in enumerate(self.scanline_df.items()):
-                if "X" in df.columns and "Y" in df.columns:
-                    # 라인 그리기
-                    self.scatter_ax.plot(df["X"], df["Y"], color="blue", linewidth=1)
+            self._draw_polyline_mode()
 
-                    # 시작점 좌표
-                    start_x, start_y = df["X"].iloc[0], df["Y"].iloc[0]
-
-                    # 시작점 옆에 scanline_df의 key 표시
-                    self.scatter_ax.annotate(
-                        str(key),  # 딕셔너리 key를 텍스트로
-                        (start_x, start_y),  # 시작점 좌표
-                        textcoords="offset points",
-                        xytext=(1, 1),  # 점에서 약간 오른쪽 위
-                        fontsize=7,
-                        color="black",
-                    )
-
-        # Plot the selected scanline on top, in red
-        if not self.selected_df.empty and "X" in self.selected_df.columns:
-            x, y = (
-                self.selected_df["X"],
-                self.selected_df["Y"],
-            )
-            self.scatter_ax.scatter(x, y, color="black", s=3)
-
-            # 라인 중간 지점 옆에 방향을 나타내는 화살표와 텍스트를 그립니다.
-            if len(self.selected_df) >= 2:
-                # 1. 스캔라인의 시작과 끝 Y좌표를 비교하여 남-북 방향을 결정합니다.
-                y_start = self.selected_df["Y"].iloc[0]
-                y_end = self.selected_df["Y"].iloc[-1]
-
-                # 2. 라인의 중간 지점 좌표를 찾습니다.
-                mid_idx = len(self.selected_df) // 2
-                start_x = self.selected_df["X"].iloc[mid_idx]
-                start_y = self.selected_df["Y"].iloc[mid_idx]
-                if y_end > y_start:
-                    end_y = start_y + 5
-                else:
-                    end_y = start_y - 5
-
-                # 3. 중간 지점 옆에 방향 텍스트와 화살표를 그립니다.
-                self.scatter_ax.annotate(
-                    "",
-                    xy=(start_x + 5, end_y + 5),  # 화살표가 가리키는 지점
-                    xytext=(start_x + 5, start_y + 5),  # 텍스트 위치 오프셋 (픽셀 단위)
-                    arrowprops=dict(
-                        arrowstyle="->",
-                        color="green",
-                        lw=3,
-                    ),
-                    zorder=6,
-                )
-        # 오프셋 모드 끄기 → 절대값 그대로 표시
+        self._draw_selected_scanline()
         self._apply_segment_overlay()
+
+        self._format_scatter_axes(val_col)
+        self.scatter_canvas.draw()
+
+    # --- Scatter plot helpers ---------------------------------------------
+    def _reset_scatter_axes(self):
+        self.scatter_fig.clear()
+        self.scatter_ax = self.scatter_fig.add_subplot(111)
+
+    def _draw_colorbar_mode(self, val_col):
+        if self.selected_col_name not in [
+            "Mag",
+            "Mag_median",
+            "Mag_lowpass",
+            "Mag_calibrated",
+        ]:
+            val_col = "Mag"
+
+        cmap = plt.get_cmap("jet")
+        all_x, all_y, all_vals = [], [], []
+        for df in self.scanline_df.values():
+            if {"X", "Y", val_col}.issubset(df.columns):
+                all_x.extend(df["X"])
+                all_y.extend(df["Y"])
+                all_vals.extend(df[val_col])
+
+        if all_x:
+            sc = self.scatter_ax.scatter(all_x, all_y, c=all_vals, cmap=cmap, s=10)
+            self.scatter_colorbar = self.scatter_fig.colorbar(
+                sc, ax=self.scatter_ax, label="Value"
+            )
+            self.scatter_colorbar.ax.ticklabel_format(useOffset=False, style="plain")
+        return val_col
+
+    def _draw_polyline_mode(self):
+        for key, df in self.scanline_df.items():
+            if "X" in df.columns and "Y" in df.columns:
+                self.scatter_ax.plot(df["X"], df["Y"], color="blue", linewidth=1)
+                start_x, start_y = df["X"].iloc[0], df["Y"].iloc[0]
+                self.scatter_ax.annotate(
+                    str(key),
+                    (start_x, start_y),
+                    textcoords="offset points",
+                    xytext=(1, 1),
+                    fontsize=7,
+                    color="black",
+                )
+
+    def _draw_selected_scanline(self):
+        if self.selected_df.empty or "X" not in self.selected_df.columns:
+            return
+        x, y = self.selected_df["X"], self.selected_df["Y"]
+        self.scatter_ax.scatter(x, y, color="black", s=3)
+
+        # Draw direction arrow near midpoint
+        if len(self.selected_df) >= 2:
+            y_start = self.selected_df["Y"].iloc[0]
+            y_end = self.selected_df["Y"].iloc[-1]
+            mid_idx = len(self.selected_df) // 2
+            start_x = self.selected_df["X"].iloc[mid_idx]
+            start_y = self.selected_df["Y"].iloc[mid_idx]
+            end_y = start_y + 5 if y_end > y_start else start_y - 5
+            self.scatter_ax.annotate(
+                "",
+                xy=(start_x + 5, end_y + 5),
+                xytext=(start_x + 5, start_y + 5),
+                arrowprops=dict(arrowstyle="->", color="green", lw=3),
+                zorder=6,
+            )
+
+    def _format_scatter_axes(self, val_col: str):
+        """공통 축 포맷/레이블 설정."""
         self.scatter_ax.ticklabel_format(useOffset=False, style="plain", axis="x")
         self.scatter_ax.ticklabel_format(useOffset=False, style="plain", axis="y")
-
         self.scatter_ax.set_title(f"{val_col}")
         self.scatter_ax.set_xlabel("X (Easting)")
         self.scatter_ax.set_ylabel("Y (Northing)")
         self.scatter_ax.set_aspect("equal", "box")
         self.scatter_ax.grid(True)
         self.scatter_fig.tight_layout()
-        self.scatter_canvas.draw()
 
     def on_item_clicked(self, item):
         name = item.text()
@@ -646,16 +644,8 @@ class LinePlotWidget(QWidget):
             self._draw_segment_overlay(self._active_segment_id, draw=False)
 
     def show_file_list_context_menu(self, position):
-        item = self.fileListWidget.itemAt(position)
-        if not item:
-            return
-
-        menu = QMenu()
-        delete_action = menu.addAction("Delete")
-        action = menu.exec(self.fileListWidget.mapToGlobal(position))
-
-        if action == delete_action:
-            self.delete_scanline_item(item)
+        # Delete context menu 비활성화 요청: 아무 동작도 하지 않음
+        return
 
     def delete_scanline_item(self, item_to_delete):
         name = item_to_delete.text()
@@ -715,174 +705,173 @@ class LinePlotWidget(QWidget):
 
     def filtering(self, settings):
         """
-        For each scanline DataFrame in self.scanline_df, read the 'Mag' column,
-        apply the enabled filters, and write the outputs to new columns.
+        For each scanline DataFrame in self.scanline_df, apply enabled filters and
+        write outputs to new columns (diurnal, median, lowpass, calibrated).
         """
-        # 현재 선택된 항목을 기억하여 필터링 후 뷰를 업데이트합니다.
         current_item = self.fileListWidget.currentItem()
+        if not current_item and self.fileListWidget.count() > 0:
+            current_item = self.fileListWidget.item(0)
         if not current_item:
-            # 선택된 항목이 없으면 첫 번째 항목을 사용합니다.
-            if self.fileListWidget.count() > 0:
-                current_item = self.fileListWidget.item(0)
-            else:
-                logger.warning("Filtering called, but no items to process.")
-                return
+            logger.warning("Filtering called, but no items to process.")
+            return
 
         logger.debug(f"LinePlotWidget filtering {settings}")
-
-        # 일보정 ---------------------
-        diurnal_cfg = settings.get("Diurnal_Correction", {})
-        if diurnal_cfg.get("enabled", False):
-            csv_files = diurnal_cfg.get("files", [])
-            diurnal_df = pd.DataFrame()
-
-            if not csv_files:
-                diurnal_df = pd.DataFrame()  # 빈 DataFrame
-            else:
-                df_list = []
-                for csv_file in csv_files:
-                    try:
-                        df = pd.read_csv(csv_file)
-                        df_list.append(df)
-                        logger.debug(f"Loaded {csv_file}")
-                    except Exception as e:
-                        logger.error(f"Error loading {csv_file}: {e}")
-
-                diurnal_df = (
-                    pd.concat(df_list, ignore_index=True) if df_list else pd.DataFrame()
-                )
-        else:
-            diurnal_df = pd.DataFrame()
+        diurnal_df = self._load_diurnal_df(settings)
 
         for key, df in self.scanline_df.items():
-            # 필터링을 다시 적용하기 전에 이전에 생성된 필터 컬럼들을 삭제합니다.
-            cols_to_drop = [
-                "Mag_diurnal",
-                "Mag_median",
-                "Mag_lowpass",
-                "Mag_calibrated",
-            ]
-            df.drop(columns=cols_to_drop, inplace=True, errors="ignore")
-
-            # ensure we don’t overwrite original
+            self._reset_filter_columns(df)
             filtered_mag = df["Mag"].astype(float)
 
-            # 일보정 ---------------------
-            try:
-                if diurnal_cfg.get("enabled", False) and not diurnal_df.empty:
-                    reference_value = diurnal_df["Mag"][0].astype(float)
-                    # df 와 diurnal_df 를 Date + Time 기준으로 merge
-                    merged = pd.merge(
-                        df,
-                        diurnal_df[["Date", "Time", "Mag"]],
-                        on=["Date", "Time"],
-                        how="left",
-                        suffixes=("", "_diurnal"),
-                    )
+            filtered_mag = self._apply_diurnal(df, filtered_mag, settings, diurnal_df, key)
+            filtered_mag = self._apply_median(df, filtered_mag, settings, key)
+            filtered_mag = self._apply_lowpass(df, filtered_mag, settings, key)
+            self._apply_calibration(df, filtered_mag, settings, key)
 
-                    # filter_mag - diurnal_mag
-                    merged["Mag_corrected"] = (
-                        merged["Mag"].astype(float)
-                        - merged["Mag_diurnal"].astype(float)
-                        + reference_value
-                    )
-
-                    df["Diurnal"] = merged["Mag_diurnal"]
-
-                    # filtered_mag 업데이트
-                    filtered_mag = merged["Mag_corrected"]
-                    df["Mag_diurnal"] = filtered_mag
-
-            except Exception as err:
-                logger.error(f"Median filter failed for {key}: {err}")
-                QMessageBox.warning(
-                    self,
-                    "Filter Error",
-                    f"Median filter failed for scanline '{key}':\n{err}",
-                )
-
-            # --- Median filter ---
-            try:
-                med_cfg = settings.get("median_filter", {})
-                if med_cfg.get("enabled", False):
-                    ksize = med_cfg.get("kernel_size", 3)
-                    df["Mag_median"] = filtered_mag.rolling(
-                        window=ksize, center=True, min_periods=1
-                    ).median()
-                    logger.debug(f"{key}: applied Median (ksize={ksize})")
-                    filtered_mag = df["Mag_median"]
-            except Exception as err:
-                logger.error(f"Median filter failed for {key}: {err}")
-                QMessageBox.warning(
-                    self,
-                    "Filter Error",
-                    f"Median filter failed for scanline '{key}':\n{err}",
-                )
-
-            # --- Low-pass filter ---
-            try:
-                low_cfg = settings.get("lowpass_filter", {})
-                if low_cfg.get("enabled", False):
-                    cutoff = low_cfg.get("cutoff_freq", 0.1)
-                    b, a = self._butter_coeffs(cutoff, 1, order=4, btype="low")
-                    df["Mag_lowpass"] = filtfilt(b, a, filtered_mag.values)
-                    logger.debug(f"{key}: applied Low-pass (cutoff={cutoff} Hz)")
-                    filtered_mag = df["Mag_lowpass"]
-            except Exception as err:
-                logger.error(f"Low-pass filter failed for {key}: {err}")
-                QMessageBox.warning(
-                    self,
-                    "Filter Error",
-                    f"Low-pass filter failed for scanline '{key}':\n{err}",
-                )
-
-            # --- Calibration filter ---
-            cal_cfg = settings.get("cali_filter", {})
-
-            if cal_cfg.get("enabled", False):
-                # 1. 스캔라인의 방향 결정
-                start_x, end_x = df["X"].iloc[0], df["X"].iloc[-1]
-                start_y, end_y = df["Y"].iloc[0], df["Y"].iloc[-1]
-                dx = end_x - start_x
-                dy = end_y - start_y
-
-                direction = None
-                if abs(dx) > abs(dy):
-                    direction = "W_E" if dx > 0 else "E_W"
-                else:
-                    direction = "S_N" if dy > 0 else "N_S"
-
-                # 2. 해당 방향의 오프셋 값 가져오기
-
-                offset_key = f"offset_{direction}"
-                offset = cal_cfg.get(offset_key, 0.0)
-
-                # 3. 오프셋을 빼서 값을 보정하고 새 컬럼에 저장
-                df["Mag_calibrated"] = filtered_mag + offset
-                logger.debug(
-                    f"{key}: applied Calibration (dir={direction}, offset={offset:.2f})"
-                )
-
-                # if "Sensor_X" in df.columns:
-                #     if direction == "S_N":
-                #         logger.debug(f"Make Cali_Sensor Data {self.calibration_data}")
-                #         df["Cal_Sensor_X"] = (
-                #             df["Sensor_X"] + self.calibration_data["offset_Sensor_X"]
-                #         )
-                #         df["Cal_Sensor_Y"] = (
-                #             df["Sensor_Y"] + self.calibration_data["offset_Sensor_Y"]
-                #         )
-                #         df["Cal_Sensor_Z"] = (
-                #             df["Sensor_Z"] + self.calibration_data["offset_Sensor_Z"]
-                #         )
-                #     else:
-                #         df["Cal_Sensor_X"] = df["Sensor_X"]
-                #         df["Cal_Sensor_Y"] = df["Sensor_Y"]
-                #         df["Cal_Sensor_Z"] = df["Sensor_Z"]
-
-        # 필터링이 적용된 후, 이전에 선택된 항목의 뷰를 새로고침합니다.
         self.on_item_clicked(current_item)
         return
+
+    # --- Filtering helpers -------------------------------------------------
+    def _load_diurnal_df(self, settings):
+        diurnal_cfg = settings.get("Diurnal_Correction", {})
+        if not diurnal_cfg.get("enabled", False):
+            return pd.DataFrame()
+
+        csv_files = diurnal_cfg.get("files", [])
+        df_list = []
+        for csv_file in csv_files:
+            try:
+                df = pd.read_csv(csv_file)
+                df_list.append(df)
+                logger.debug(f"Loaded {csv_file}")
+            except Exception as e:
+                logger.error(f"Error loading {csv_file}: {e}")
+        return pd.concat(df_list, ignore_index=True) if df_list else pd.DataFrame()
+
+    def _reset_filter_columns(self, df: pd.DataFrame):
+        cols_to_drop = ["Mag_diurnal", "Mag_median", "Mag_lowpass", "Mag_calibrated"]
+        df.drop(columns=cols_to_drop, inplace=True, errors="ignore")
+
+    def _apply_diurnal(self, df, filtered_mag, settings, diurnal_df, key):
+        diurnal_cfg = settings.get("Diurnal_Correction", {})
+        if not diurnal_cfg.get("enabled", False) or diurnal_df.empty:
+            return filtered_mag
+        try:
+            reference_value = diurnal_df["Mag"][0].astype(float)
+            merged = pd.merge(
+                df,
+                diurnal_df[["Date", "Time", "Mag"]],
+                on=["Date", "Time"],
+                how="left",
+                suffixes=("", "_diurnal"),
+            )
+            merged["Mag_corrected"] = (
+                merged["Mag"].astype(float)
+                - merged["Mag_diurnal"].astype(float)
+                + reference_value
+            )
+            df["Diurnal"] = merged["Mag_diurnal"]
+            df["Mag_diurnal"] = merged["Mag_corrected"]
+            return df["Mag_diurnal"]
+        except Exception as err:
+            logger.error(f"Diurnal correction failed for {key}: {err}")
+            QMessageBox.warning(
+                self,
+                "Filter Error",
+                f"Diurnal correction failed for scanline '{key}':\n{err}",
+            )
+            return filtered_mag
+
+    def _apply_median(self, df, filtered_mag, settings, key):
+        med_cfg = settings.get("median_filter", {})
+        if not med_cfg.get("enabled", False):
+            return filtered_mag
+        try:
+            ksize = med_cfg.get("kernel_size", 3)
+            df["Mag_median"] = filtered_mag.rolling(
+                window=ksize, center=True, min_periods=1
+            ).median()
+            logger.debug(f"{key}: applied Median (ksize={ksize})")
+            return df["Mag_median"]
+        except Exception as err:
+            logger.error(f"Median filter failed for {key}: {err}")
+            QMessageBox.warning(
+                self,
+                "Filter Error",
+                f"Median filter failed for scanline '{key}':\n{err}",
+            )
+            return filtered_mag
+
+    def _apply_lowpass(self, df, filtered_mag, settings, key):
+        low_cfg = settings.get("lowpass_filter", {})
+        if not low_cfg.get("enabled", False):
+            return filtered_mag
+        try:
+            cutoff = low_cfg.get("cutoff_freq", 0.1)
+            b, a = self._butter_coeffs(cutoff, 1, order=4, btype="low")
+            df["Mag_lowpass"] = filtfilt(b, a, filtered_mag.values)
+            logger.debug(f"{key}: applied Low-pass (cutoff={cutoff} Hz)")
+            return df["Mag_lowpass"]
+        except Exception as err:
+            logger.error(f"Low-pass filter failed for {key}: {err}")
+            QMessageBox.warning(
+                self,
+                "Filter Error",
+                f"Low-pass filter failed for scanline '{key}':\n{err}",
+            )
+            return filtered_mag
+
+    def _apply_calibration(self, df, filtered_mag, settings, key):
+        cal_cfg = settings.get("cali_filter", {})
+        if not cal_cfg.get("enabled", False):
+            return
+        if not {"X", "Y"}.issubset(df.columns):
+            logger.warning(f"{key}: Calibration skipped (missing X/Y columns)")
+            return
+
+        start_x, end_x = df["X"].iloc[0], df["X"].iloc[-1]
+        start_y, end_y = df["Y"].iloc[0], df["Y"].iloc[-1]
+        dx = end_x - start_x
+        dy = end_y - start_y
+
+        if abs(dx) > abs(dy):
+            direction = "LR" if dx > 0 else "RL"
+        else:
+            direction = "BU" if dy > 0 else "TD"
+
+        offset_key = f"offset_{direction}"
+        offset = cal_cfg.get(offset_key, 0.0)
+
+        df["Mag_calibrated"] = filtered_mag + offset
+        logger.debug(f"{key}: applied Calibration (dir={direction}, offset={offset:.2f})")
+
+    # --- Minimal self-test helpers (manual) -------------------------------
+    def _selftest_filters(self):
+        """
+        간단한 샘플 데이터로 필터 헬퍼를 검증할 때 수동 호출.
+        실행하지 않고 참조용으로만 둠.
+        """
+        import numpy as np
+
+        df = pd.DataFrame(
+            {
+                "Date": ["2025-01-01"] * 5,
+                "Time": ["00:00:0" + str(i) for i in range(5)],
+                "Mag": [10, 12, 11, 13, 12],
+                "X": np.arange(5),
+                "Y": np.arange(5),
+            }
+        )
+        settings = {
+            "Diurnal_Correction": {"enabled": False, "files": []},
+            "median_filter": {"enabled": True, "kernel_size": 3},
+            "lowpass_filter": {"enabled": False},
+            "cali_filter": {"enabled": True, "offset_LR": 1, "offset_RL": -1, "offset_TD": 0, "offset_BU": 0},
+        }
+        self._reset_filter_columns(df)
+        mag = df["Mag"].astype(float)
+        mag = self._apply_median(df, mag, settings, "selftest")
+        self._apply_calibration(df, mag, settings, "selftest")
+        return df
 
     def openKrigingDialog(self):
         column_index = self.tableWidget.currentColumn()

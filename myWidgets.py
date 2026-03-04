@@ -100,25 +100,33 @@ class DataFilterDialog(QDialog):
         grid.setColumnStretch(
             0, 1
         )  # 첫 번째 열에 신축성을 부여하여 오른쪽으로 밀어냅니다.
-        # Row 1
-        self.ew_input = QLineEdit("0")
-        grid.addWidget(QLabel("E → W"), 1, 1, alignment=Qt.AlignmentFlag.AlignCenter)
-        grid.addWidget(self.ew_input, 1, 2)
+        # Row 1 (match Calibration Flight order: vertical first)
+        self.td_input = QLineEdit("0")  # Top -> Down
+        grid.addWidget(
+            QLabel("Top -> Down"), 1, 1, alignment=Qt.AlignmentFlag.AlignCenter
+        )
+        grid.addWidget(self.td_input, 1, 2)
 
         # Row 2
-        self.we_input = QLineEdit("0")
-        grid.addWidget(QLabel("W → E"), 2, 1, alignment=Qt.AlignmentFlag.AlignCenter)
-        grid.addWidget(self.we_input, 2, 2)
+        self.bu_input = QLineEdit("0")  # Bottom -> Up
+        grid.addWidget(
+            QLabel("Down -> Top"), 2, 1, alignment=Qt.AlignmentFlag.AlignCenter
+        )
+        grid.addWidget(self.bu_input, 2, 2)
 
         # Row 3
-        self.ns_input = QLineEdit("0")
-        grid.addWidget(QLabel("N → S"), 3, 1, alignment=Qt.AlignmentFlag.AlignCenter)
-        grid.addWidget(self.ns_input, 3, 2)
+        self.lr_input = QLineEdit("0")  # Left -> Right
+        grid.addWidget(
+            QLabel("Left -> Right"), 3, 1, alignment=Qt.AlignmentFlag.AlignCenter
+        )
+        grid.addWidget(self.lr_input, 3, 2)
 
         # Row 4
-        self.sn_input = QLineEdit("0")
-        grid.addWidget(QLabel("S → N"), 4, 1, alignment=Qt.AlignmentFlag.AlignCenter)
-        grid.addWidget(self.sn_input, 4, 2)
+        self.rl_input = QLineEdit("0")  # Right -> Left
+        grid.addWidget(
+            QLabel("Right -> Left"), 4, 1, alignment=Qt.AlignmentFlag.AlignCenter
+        )
+        grid.addWidget(self.rl_input, 4, 2)
         form.addRow(grid)
 
         # Set initial state of the button
@@ -158,19 +166,21 @@ class DataFilterDialog(QDialog):
         )
         self.load_cal_btn.setEnabled(is_checked)
         self.calc_cal_btn.setEnabled(is_checked)
-        self.ew_input.setEnabled(is_checked)
-        self.we_input.setEnabled(is_checked)
-        self.ns_input.setEnabled(is_checked)
-        self.sn_input.setEnabled(is_checked)
+        self.rl_input.setEnabled(is_checked)
+        self.lr_input.setEnabled(is_checked)
+        self.td_input.setEnabled(is_checked)
+        self.bu_input.setEnabled(is_checked)
 
     def calc_calibration_data(self):
         logger.debug("DataFilterDialog calc_calibration_data called")
         self.parentWidget.calculate_directional_avg_from_df()
-        cali_cfg = self.filters.get("cali_filter", {})
-        self.sn_input.setText(str(cali_cfg.get("offset_S_N", 0.0)))
-        self.ns_input.setText(str(cali_cfg.get("offset_N_S", 0.0)))
-        self.we_input.setText(str(cali_cfg.get("offset_W_E", 0.0)))
-        self.ew_input.setText(str(cali_cfg.get("offset_E_W", 0.0)))
+        # 최신 계산값을 config에서 다시 불러와 UI에 반영
+        filters_line = config.get("filters_line", {})
+        cali_cfg = filters_line.get("cali_filter", self.filters.get("cali_filter", {}))
+        self.bu_input.setText(str(cali_cfg.get("offset_BU", 0.0)))
+        self.td_input.setText(str(cali_cfg.get("offset_TD", 0.0)))
+        self.lr_input.setText(str(cali_cfg.get("offset_LR", 0.0)))
+        self.rl_input.setText(str(cali_cfg.get("offset_RL", 0.0)))
 
     def load_calibration_data(self):
         """Load calibration data from calibration.txt in the project folder."""
@@ -195,10 +205,31 @@ class DataFilterDialog(QDialog):
                     direction, value = parts
                     cal_values[direction.upper()] = value
 
-            self.ew_input.setText(cal_values.get("EW", "0"))
-            self.we_input.setText(cal_values.get("WE", "0"))
-            self.ns_input.setText(cal_values.get("NS", "0"))
-            self.sn_input.setText(cal_values.get("SN", "0"))
+            # Support both legacy labels (EW/WE/NS/SN) and new labels (RL/LR/TD/BU).
+            self.rl_input.setText(
+                cal_values.get("RL", cal_values.get("EW", "0"))
+            )
+            self.lr_input.setText(
+                cal_values.get("LR", cal_values.get("WE", "0"))
+            )
+            self.td_input.setText(
+                cal_values.get("TD", cal_values.get("NS", "0"))
+            )
+            self.bu_input.setText(
+                cal_values.get("BU", cal_values.get("SN", "0"))
+            )
+
+            QMessageBox.information(
+                self,
+                "Flight Calibration Loaded",
+                (
+                    "Loaded calibration.txt\n"
+                    f"Top->Down: {self.td_input.text()}\n"
+                    f"Down->Top: {self.bu_input.text()}\n"
+                    f"Left->Right: {self.lr_input.text()}\n"
+                    f"Right->Left: {self.rl_input.text()}"
+                ),
+            )
 
             logger.info("Calibration data loaded from file.")
         except Exception as e:
@@ -215,10 +246,10 @@ class DataFilterDialog(QDialog):
 
             cali_offsets = {}
             # Also validate calibration inputs if the filter is enabled
-            cali_offsets["offset_E_W"] = float(self.ew_input.text() or 0)
-            cali_offsets["offset_W_E"] = float(self.we_input.text() or 0)
-            cali_offsets["offset_N_S"] = float(self.ns_input.text() or 0)
-            cali_offsets["offset_S_N"] = float(self.sn_input.text() or 0)
+            cali_offsets["offset_RL"] = float(self.rl_input.text() or 0)  # Right -> Left
+            cali_offsets["offset_LR"] = float(self.lr_input.text() or 0)  # Left -> Right
+            cali_offsets["offset_TD"] = float(self.td_input.text() or 0)  # Top -> Down
+            cali_offsets["offset_BU"] = float(self.bu_input.text() or 0)  # Down -> Top
         except ValueError:
             QMessageBox.warning(
                 self,
@@ -255,10 +286,10 @@ class DataFilterDialog(QDialog):
         }
         self.filters["cali_filter"] = {
             "enabled": self.cal_cb.isChecked(),
-            "offset_E_W": cali_offsets.get("offset_E_W", 0),
-            "offset_W_E": cali_offsets.get("offset_W_E", 0),
-            "offset_N_S": cali_offsets.get("offset_N_S", 0),
-            "offset_S_N": cali_offsets.get("offset_S_N", 0),
+            "offset_RL": cali_offsets.get("offset_RL", 0),
+            "offset_LR": cali_offsets.get("offset_LR", 0),
+            "offset_TD": cali_offsets.get("offset_TD", 0),
+            "offset_BU": cali_offsets.get("offset_BU", 0),
         }
         diurnal_cfg = self.filters.setdefault("Diurnal_Correction", {})
         diurnal_cfg["enabled"] = self.diurnal_cb.isChecked()
