@@ -42,6 +42,7 @@ from mySettings import config
 from kriging_dialog import KrigingPlotDialog_withHead
 from myWidgets import DataFilterDialog
 
+from micro_levelling_medain_filter import run_micro_level
 
 class LinePlotWidget(QWidget):
     def __init__(
@@ -655,8 +656,15 @@ class LinePlotWidget(QWidget):
             self._draw_segment_overlay(self._active_segment_id, draw=False)
 
     def show_file_list_context_menu(self, position):
-        # Delete context menu 비활성화 요청: 아무 동작도 하지 않음
-        return
+        item = self.fileListWidget.itemAt(position)
+        if item is None:
+            return
+
+        menu = QMenu(self)
+        delete_action = menu.addAction("Delete")
+        selected_action = menu.exec(self.fileListWidget.mapToGlobal(position))
+        if selected_action == delete_action:
+            self.delete_scanline_item(item)
 
     def delete_scanline_item(self, item_to_delete):
         name = item_to_delete.text()
@@ -738,7 +746,8 @@ class LinePlotWidget(QWidget):
             filtered_mag = self._apply_median(df, filtered_mag, settings, key)
             filtered_mag = self._apply_lowpass(df, filtered_mag, settings, key)
             self._apply_calibration(df, filtered_mag, settings, key)
-
+        # filtered_mag = self._apply_micro_levelling(df, filtered_mag, settings, key)
+            
         self.on_item_clicked(current_item)
         return
 
@@ -763,6 +772,7 @@ class LinePlotWidget(QWidget):
         cols_to_drop = [
             "Mag_diurnal",
             "Mag_median",
+            "Mag_micro",
             "Mag_lowpass",
             "Mag_calibrated",
             "IGRF",
@@ -906,6 +916,43 @@ class LinePlotWidget(QWidget):
                 self,
                 "Filter Error",
                 f"Median filter failed for scanline '{key}':\n{err}",
+            )
+            return filtered_mag
+
+    def _apply_micro_levelling(self, df, filtered_mag, settings, key):
+        """
+        Placeholder for micro levelling pipeline.
+
+        Expected to:
+        - use short/long filters (or window lengths) from config
+        - optionally apply 2D median smoothing with search radius / neighbor count
+        - write output to df['Mag_micro'] and return that series
+
+        Currently just mirrors the input so downstream filters remain unchanged.
+        """
+        micro_cfg = settings.get("micro_levelling", {})
+        if not micro_cfg.get("enabled", False):
+            return filtered_mag
+        try:
+            short_len = micro_cfg.get("short_filter_size", micro_cfg.get("window_size", 5))
+            long_len = micro_cfg.get("long_filter_size", micro_cfg.get("poly_order", 2))
+            search_radius = micro_cfg.get("search_radius", 5.0)
+            min_neighbors = micro_cfg.get("min_neighbor_count", 5)
+
+            logger.debug(
+                f"{key}: micro levelling (placeholder) short={short_len}, long={long_len}, "
+                f"radius={search_radius}, min_neighbors={min_neighbors}"
+            )
+            filtered = run_micro_level(filtered_mag, df, short_len, long_len, search_radius, min_neighbors)
+            df["Mag_micro"] = filtered
+
+            return df["Mag_micro"]
+        except Exception as err:
+            logger.error(f"Micro levelling failed for {key}: {err}")
+            QMessageBox.warning(
+                self,
+                "Filter Error",
+                f"Micro levelling failed for scanline '{key}':\n{err}",
             )
             return filtered_mag
 

@@ -73,7 +73,34 @@ class DataFilterDialog(QDialog):
         form.addRow(self.igrf_cb)
         self.igrf_altitude = QLineEdit(str(igrf_cfg.get("flight_altitude", 0)))
         form.addRow("Flight Altitude (m):", self.igrf_altitude)
-        
+
+        # --- Micro Levelling ---
+        self.micro_cb = QCheckBox("Micro Levelling")  
+        micro_cfg = self.filters.get("micro_levelling", {})
+        self.micro_cb.setChecked(micro_cfg.get("enabled", False)) 
+        form.addRow(self.micro_cb)
+        short_default = micro_cfg.get(
+            "short_filter_size", micro_cfg.get("window_size", 5)
+        )
+        self.micro_short = QLineEdit(str(short_default))
+        form.addRow("Short Filter Size:", self.micro_short)
+
+        long_default = micro_cfg.get(
+            "long_filter_size", micro_cfg.get("poly_order", 2)
+        )
+        self.micro_long = QLineEdit(str(long_default))
+        form.addRow("Long Filter Size:", self.micro_long)
+
+        self.micro_radius = QLineEdit(str(micro_cfg.get("search_radius", 5)))
+        form.addRow("2D Search Radius:", self.micro_radius)
+
+        self.micro_neighbors = QLineEdit(
+            str(micro_cfg.get("min_neighbor_count", 5))
+        )
+        form.addRow(
+            "Minimum Neighbor Count:", self.micro_neighbors
+        )
+             
         # --- Median Filter ---
         self.median_cb = QCheckBox("Median Filter")
         med_cfg = self.filters.get("median_filter", {})
@@ -262,6 +289,10 @@ class DataFilterDialog(QDialog):
     def accept(self):
         # validate numeric inputs
         try:
+            micro_short = int(self.micro_short.text())
+            micro_long = int(self.micro_long.text())
+            micro_radius = float(self.micro_radius.text())
+            micro_neighbors = int(self.micro_neighbors.text())
             ksize = int(self.median_size.text())
             low_f = float(self.low_cutoff.text())
             flight_altitude = float(self.igrf_altitude.text() or 0)
@@ -276,7 +307,10 @@ class DataFilterDialog(QDialog):
             QMessageBox.warning(
                 self,
                 "Input Error",
-                "Median size, cutoff frequencies, and calibration offsets must be valid numbers.",
+                (
+                    "Micro levelling settings, median size, cutoff frequencies, "
+                    "and calibration offsets must be valid numbers."
+                ),
             )
             return
         # 2) Validate range
@@ -289,6 +323,30 @@ class DataFilterDialog(QDialog):
             )
             return
 
+        if micro_short <= 0 or micro_long <= 0:
+            QMessageBox.warning(
+                self,
+                "Micro Levelling Error",
+                "Short and long filter sizes must be positive integers.",
+            )
+            return
+
+        if micro_radius <= 0:
+            QMessageBox.warning(
+                self,
+                "Micro Levelling Error",
+                "2D search radius must be greater than 0.",
+            )
+            return
+
+        if micro_neighbors <= 0:
+            QMessageBox.warning(
+                self,
+                "Micro Levelling Error",
+                "Min neighbor count must be at least 1.",
+            )
+            return
+
         if ksize <= 0:
             QMessageBox.warning(
                 self,
@@ -297,7 +355,16 @@ class DataFilterDialog(QDialog):
             )
             return
         # write back into filters dict
-
+        self.filters["micro_levelling"] = {
+            "enabled": self.micro_cb.isChecked(),
+            "short_filter_size": micro_short,
+            "long_filter_size": micro_long,
+            "search_radius": micro_radius,
+            "min_neighbor_count": micro_neighbors,
+            # legacy keys for backward compatibility
+            "window_size": micro_short,
+            "poly_order": micro_long,
+        }
         self.filters["median_filter"] = {
             "enabled": self.median_cb.isChecked(),
             "kernel_size": ksize,
