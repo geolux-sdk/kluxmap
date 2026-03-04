@@ -664,12 +664,15 @@ class DataManager:
             line_entries.sort(key=lambda item: item["start_x"])
             outdir = Path(output_dir)
             outdir.mkdir(parents=True, exist_ok=True)
+            total = len(line_entries)
+            width = max(2, len(str(total)))
             for entry in line_entries:
                 g = entry["df"]
-                fpath = outdir / f"{prefix}_{len(saved_files) + 1}.csv"
+                idx = len(saved_files) + 1
+                fpath = outdir / f"{prefix}_{idx:0{width}d}.csv"
                 try:
                     g.to_csv(fpath, index=False)
-                    logger.debug(f"Saved group #{len(saved_files) + 1} -> {fpath}")
+                    logger.debug(f"Saved group #{idx} -> {fpath}")
                     saved_files.append(str(fpath))
                 except Exception as e:
                     logger.error(
@@ -722,12 +725,14 @@ class DataManager:
         saved_files: list[str] = []
         outdir = Path(output_dir)
         outdir.mkdir(parents=True, exist_ok=True)
+        total = len(groups)
+        width = max(2, len(str(total)))
         for idx, item in enumerate(groups, start=1):
             g = item["df"].reset_index(drop=True)
             if "record_id" in g.columns:
                 g["record_id"] = pd.to_numeric(g["record_id"], errors="coerce")
                 g = g.sort_values("record_id").reset_index(drop=True)
-            fpath = outdir / f"{prefix}_{idx}.csv"
+            fpath = outdir / f"{prefix}_{idx:0{width}d}.csv"
             try:
                 g.to_csv(fpath, index=False)
                 logger.debug(f"Saved group #{idx} -> {fpath}")

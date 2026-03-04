@@ -53,12 +53,18 @@ class DataFilterDialog(QDialog):
         self.fs = 1
 
         form = QFormLayout(self)
+        # --- IGRF Correction ---
+        self.igrf_cb = QCheckBox("IGRF Correction")
+        igrf_cfg = self.filters.get("igrf_correction", {})
+        self.igrf_cb.setChecked(igrf_cfg.get("enabled", False))
+        form.addRow(self.igrf_cb)
+
         self.diurnal_cb = QCheckBox("Diurnal Correction")
         diurnal_cfg = self.filters.get("Diurnal_Correction", {})
         self.diurnal_cb.setChecked(diurnal_cfg.get("enabled", False))
         self.diurnal_cb.stateChanged.connect(self.update_diurnal_cb_state)
         form.addRow(self.diurnal_cb)
-
+     
         self.load_diurnal_btn = QPushButton("Load Diurnal Data")
         self.load_diurnal_btn.clicked.connect(self.load_diurnal_data)
         form.addRow(self.load_diurnal_btn)
@@ -182,41 +188,45 @@ class DataFilterDialog(QDialog):
         self.lr_input.setText(str(cali_cfg.get("offset_LR", 0.0)))
         self.rl_input.setText(str(cali_cfg.get("offset_RL", 0.0)))
 
+    def _read_calibration_file(self, file_path):
+        """Parse calibration.txt and return a direction→value dict.
+
+        Raises:
+            FileNotFoundError: if the calibration file is missing.
+        """
+        if not os.path.exists(file_path):
+            raise FileNotFoundError(file_path)
+
+        with open(file_path, "r", encoding="utf-8") as f:
+            lines = f.readlines()
+
+        cal_values = {}
+        for line in lines:
+            parts = line.strip().split()
+            if len(parts) == 2:
+                direction, value = parts
+                cal_values[direction.upper()] = value
+        return cal_values
+
     def load_calibration_data(self):
         """Load calibration data from calibration.txt in the project folder."""
         try:
             file_path = os.path.join(config.get("project_path"), "calibration.txt")
 
-            if not os.path.exists(file_path):
-                QMessageBox.warning(
-                    self,
-                    "File Not Found",
-                    f"calibration.txt not found in the project folder:\n{file_path}",
-                )
-                return
-
-            with open(file_path, "r", encoding="utf-8") as f:
-                lines = f.readlines()
-
-            cal_values = {}
-            for line in lines:
-                parts = line.strip().split()
-                if len(parts) == 2:
-                    direction, value = parts
-                    cal_values[direction.upper()] = value
+            cal_values = self._read_calibration_file(file_path)
 
             # Support both legacy labels (EW/WE/NS/SN) and new labels (RL/LR/TD/BU).
             self.rl_input.setText(
-                cal_values.get("RL", cal_values.get("EW", "0"))
+                cal_values.get("RL", cal_values.get("RL", "0"))
             )
             self.lr_input.setText(
-                cal_values.get("LR", cal_values.get("WE", "0"))
+                cal_values.get("LR", cal_values.get("LR", "0"))
             )
             self.td_input.setText(
-                cal_values.get("TD", cal_values.get("NS", "0"))
+                cal_values.get("TD", cal_values.get("TD", "0"))
             )
             self.bu_input.setText(
-                cal_values.get("BU", cal_values.get("SN", "0"))
+                cal_values.get("BU", cal_values.get("BU", "0"))
             )
 
             QMessageBox.information(
@@ -232,6 +242,12 @@ class DataFilterDialog(QDialog):
             )
 
             logger.info("Calibration data loaded from file.")
+        except FileNotFoundError:
+            QMessageBox.warning(
+                self,
+                "File Not Found",
+                f"calibration.txt not found in the project folder:\n{file_path}",
+            )
         except Exception as e:
             logger.error(f"Failed to load or parse calibration file: {e}")
             QMessageBox.critical(
@@ -283,6 +299,9 @@ class DataFilterDialog(QDialog):
         self.filters["lowpass_filter"] = {
             "enabled": self.low_cb.isChecked(),
             "cutoff_freq": low_f,
+        }
+        self.filters["igrf_correction"] = {
+            "enabled": self.igrf_cb.isChecked(),
         }
         self.filters["cali_filter"] = {
             "enabled": self.cal_cb.isChecked(),

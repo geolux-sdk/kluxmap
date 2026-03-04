@@ -2,11 +2,15 @@ import os
 import math
 import shutil
 from typing import Optional
+from datetime import datetime
+
+import numpy as np
 
 import matplotlib.pyplot as plt
 import pandas as pd
 from loguru import logger
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
+import ppigrf
 
 # 파일 상단에 추가
 from PySide6.QtCore import Qt, QSize, Slot
@@ -324,7 +328,11 @@ class LinePlotWidget(QWidget):
         self.scanline_filepaths.clear()
 
         if file_paths:
-            for file_path in file_paths:
+            filtered_paths = [
+                fp for fp in file_paths if os.path.basename(fp).lower().startswith("line")
+            ]
+
+            for file_path in sorted(filtered_paths):
                 base = os.path.basename(file_path)  # 파일명만 추출
                 name_wo_ext = os.path.splitext(base)[0]  # 확장자 제거
                 item = QListWidgetItem(name_wo_ext)
@@ -374,9 +382,12 @@ class LinePlotWidget(QWidget):
     def _draw_colorbar_mode(self, val_col):
         if self.selected_col_name not in [
             "Mag",
+            "Mag_diurnal",
             "Mag_median",
             "Mag_lowpass",
             "Mag_calibrated",
+            "Mag_igrf",
+            "IGRF",
         ]:
             val_col = "Mag"
 
@@ -723,6 +734,7 @@ class LinePlotWidget(QWidget):
             filtered_mag = df["Mag"].astype(float)
 
             filtered_mag = self._apply_diurnal(df, filtered_mag, settings, diurnal_df, key)
+            filtered_mag = self._apply_igrf(df, filtered_mag, settings, key)
             filtered_mag = self._apply_median(df, filtered_mag, settings, key)
             filtered_mag = self._apply_lowpass(df, filtered_mag, settings, key)
             self._apply_calibration(df, filtered_mag, settings, key)
@@ -748,7 +760,14 @@ class LinePlotWidget(QWidget):
         return pd.concat(df_list, ignore_index=True) if df_list else pd.DataFrame()
 
     def _reset_filter_columns(self, df: pd.DataFrame):
-        cols_to_drop = ["Mag_diurnal", "Mag_median", "Mag_lowpass", "Mag_calibrated"]
+        cols_to_drop = [
+            "Mag_diurnal",
+            "Mag_median",
+            "Mag_lowpass",
+            "Mag_calibrated",
+            "IGRF",
+            "Mag_igrf",
+        ]
         df.drop(columns=cols_to_drop, inplace=True, errors="ignore")
 
     def _apply_diurnal(self, df, filtered_mag, settings, diurnal_df, key):
@@ -778,6 +797,90 @@ class LinePlotWidget(QWidget):
                 self,
                 "Filter Error",
                 f"Diurnal correction failed for scanline '{key}':\n{err}",
+            )
+            return filtered_mag
+
+    def _apply_igrf(self, df, filtered_mag, settings, key):
+        """
+        IGRF 보정: 좌표와 시각을 이용해 모델 자기장을 계산하고 관측값에서 뺀다.
+        - df["IGRF"] : 계산된 모델 총자기장 (nT)
+        - df["Mag_igrf"] : filtered_mag - IGRF (TMA와 동일 개념)
+        """
+        igrf_cfg = settings.get("igrf_correction", {})
+        if not igrf_cfg.get("enabled", False):
+            return filtered_mag
+
+        required_cols = {"Latitude", "Longitude"}
+        if not required_cols.issubset(df.columns):
+            logger.warning(f"{key}: IGRF skipped (Latitude/Longitude missing)")
+            return filtered_mag
+
+        try:
+            lats = pd.to_numeric(df["Latitude"], errors="coerce").to_numpy()
+            lons = pd.to_numeric(df["Longitude"], errors="coerce").to_numpy()
+            if "Altitude" in df.columns:
+                alt_km = (
+                    pd.to_numeric(df["Altitude"], errors="coerce").to_numpy() / 1000.0
+                )
+            else:
+                alt_km = np.zeros_like(lats, dtype=float)
+            alt_km = np.nan_to_num(alt_km, nan=0.0)
+
+            coord_valid = (~np.isnan(lats)) & (~np.isnan(lons))
+            if not coord_valid.any():
+                logger.warning(f"{key}: IGRF skipped (no valid lat/lon)")
+                return filtered_mag
+
+            # 시각: Date+Time 조합이 있으면 사용, 없으면 첫 행 날짜/현재 시각 사용
+            if {"Date", "Time"}.issubset(df.columns):
+                timestamps = pd.to_datetime(
+                    df["Date"].astype(str) + " " + df["Time"].astype(str),
+                    errors="coerce",
+                )
+            elif "Date" in df.columns:
+                timestamps = pd.to_datetime(df["Date"].astype(str), errors="coerce")
+            else:
+                timestamps = pd.Series([pd.Timestamp(datetime.utcnow())] * len(df))
+
+            igrf_vals = np.full(len(df), np.nan, dtype=float)
+
+            # 날짜별로 묶어서 계산(IGRF는 일 단위 변화가 작으므로 date만 사용)
+            valid_idx = ~timestamps.isna()
+            if not valid_idx.any():
+                logger.warning(f"{key}: IGRF skipped (no valid timestamps)")
+                return filtered_mag
+
+            unique_times = pd.to_datetime(pd.unique(timestamps[valid_idx].dropna()))
+            for ts in sorted(unique_times):
+                ts = pd.Timestamp(ts)
+                mask = (timestamps == ts) & valid_idx & coord_valid
+                if not mask.any():
+                    continue
+                dt = ts.to_pydatetime()
+                Be, Bn, Bu = ppigrf.igrf(lons[mask], lats[mask], alt_km[mask], dt)
+                igrf_vals[mask] = np.linalg.norm(
+                    np.column_stack([Be, Bn, Bu]), axis=1
+                )
+
+            df["IGRF"] = igrf_vals
+            df["Mag_igrf"] = filtered_mag.values - df["IGRF"].values
+            logger.debug(f"{key}: applied IGRF correction (n={len(df)})")
+
+            sample_mask = valid_idx & coord_valid & ~np.isnan(igrf_vals)
+            if sample_mask.any():
+                idx = int(np.flatnonzero(sample_mask)[0])
+                ts = timestamps.iloc[idx]
+                logger.debug(
+                    f"{key}: sample IGRF lat={lats[idx]:.5f}, lon={lons[idx]:.5f}, "
+                    f"alt_km={alt_km[idx]:.3f}, date={ts.date()}, IGRF={igrf_vals[idx]:.2f} nT"
+                )
+            return df["Mag_igrf"]
+        except Exception as err:
+            logger.error(f"IGRF correction failed for {key}: {err}")
+            QMessageBox.warning(
+                self,
+                "Filter Error",
+                f"IGRF correction failed for scanline '{key}':\n{err}",
             )
             return filtered_mag
 
