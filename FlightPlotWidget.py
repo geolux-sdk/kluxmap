@@ -345,6 +345,10 @@ class FlightPlotWidget(QWidget):
 
     def _on_plot_tab_changed(self, index):
         is_line_tab = self.plotTabs.tabText(index) == "Line"
+        try:
+            config.set("flightplot_last_tab", self.plotTabs.tabText(index), save=True)
+        except Exception as e:
+            logger.warning(f"Failed to persist last tab: {e}")
         self._update_line_tab_controls(is_line_tab)
         if is_line_tab:
             if not self._plot_df_by_file:
@@ -369,6 +373,12 @@ class FlightPlotWidget(QWidget):
                             "No data available to regenerate.",
                         )
             self.updateLinePlot()
+        else:
+            # Ensure line tools off when returning to Flight
+            if self.actionDataCutDisp.isChecked():
+                self.actionDataCutDisp.setChecked(False)
+            if self.actionDataJoinDisp.isChecked():
+                self.actionDataJoinDisp.setChecked(False)
 
     def _reset_line_edit_state(self, clear_undo: bool = True) -> None:
         self._line_cut_points = {}
@@ -1463,6 +1473,24 @@ class FlightPlotWidget(QWidget):
         if self._regenerate_line_tab_data(reset_state=False):
             self.updateLinePlot()
 
+    def _restore_last_tab(self) -> None:
+        """Select Line tab on project load if it was last used and data exists."""
+        if not hasattr(self, "plotTabs"):
+            return
+        last_tab = str(config.get("flightplot_last_tab", "Flight")).strip()
+        if not last_tab:
+            return
+        # Do not switch to Line unless data is ready
+        if last_tab.lower() == "line":
+            has_line_data = bool(self._line_plot_df_by_file or self._line_base_df_by_file)
+            if not has_line_data:
+                return
+        for idx in range(self.plotTabs.count()):
+            if self.plotTabs.tabText(idx).lower() == last_tab.lower():
+                if self.plotTabs.currentIndex() != idx:
+                    self.plotTabs.setCurrentIndex(idx)
+                return
+
     def _clear_plot_for_empty_selection(self, title: str) -> None:
         self._clear_overlay_artists()
         self._clear_legend()
@@ -2347,6 +2375,7 @@ class FlightPlotWidget(QWidget):
         self._load_line_edit_state()
         self.updatePlot()
         self._ensure_line_tab_state_restored()
+        self._restore_last_tab()
 
     @Slot()
     def on_project_reset(self):

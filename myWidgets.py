@@ -53,12 +53,9 @@ class DataFilterDialog(QDialog):
         self.fs = 1
 
         form = QFormLayout(self)
-        # --- IGRF Correction ---
-        self.igrf_cb = QCheckBox("IGRF Correction")
-        igrf_cfg = self.filters.get("igrf_correction", {})
-        self.igrf_cb.setChecked(igrf_cfg.get("enabled", False))
-        form.addRow(self.igrf_cb)
 
+
+        # Diurnal Correction
         self.diurnal_cb = QCheckBox("Diurnal Correction")
         diurnal_cfg = self.filters.get("Diurnal_Correction", {})
         self.diurnal_cb.setChecked(diurnal_cfg.get("enabled", False))
@@ -69,6 +66,14 @@ class DataFilterDialog(QDialog):
         self.load_diurnal_btn.clicked.connect(self.load_diurnal_data)
         form.addRow(self.load_diurnal_btn)
 
+        # --- IGRF Correction ---
+        self.igrf_cb = QCheckBox("IGRF Correction")
+        igrf_cfg = self.filters.get("igrf_correction", {})
+        self.igrf_cb.setChecked(igrf_cfg.get("enabled", False))
+        form.addRow(self.igrf_cb)
+        self.igrf_altitude = QLineEdit(str(igrf_cfg.get("flight_altitude", 0)))
+        form.addRow("Flight Altitude (m):", self.igrf_altitude)
+        
         # --- Median Filter ---
         self.median_cb = QCheckBox("Median Filter")
         med_cfg = self.filters.get("median_filter", {})
@@ -259,6 +264,7 @@ class DataFilterDialog(QDialog):
         try:
             ksize = int(self.median_size.text())
             low_f = float(self.low_cutoff.text())
+            flight_altitude = float(self.igrf_altitude.text() or 0)
 
             cali_offsets = {}
             # Also validate calibration inputs if the filter is enabled
@@ -302,6 +308,7 @@ class DataFilterDialog(QDialog):
         }
         self.filters["igrf_correction"] = {
             "enabled": self.igrf_cb.isChecked(),
+            "flight_altitude": flight_altitude,
         }
         self.filters["cali_filter"] = {
             "enabled": self.cal_cb.isChecked(),

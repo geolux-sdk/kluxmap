@@ -818,7 +818,12 @@ class LinePlotWidget(QWidget):
         try:
             lats = pd.to_numeric(df["Latitude"], errors="coerce").to_numpy()
             lons = pd.to_numeric(df["Longitude"], errors="coerce").to_numpy()
-            if "Altitude" in df.columns:
+            flight_altitude_m = float(igrf_cfg.get("flight_altitude", 0) or 0)
+
+            if flight_altitude_m != 0:
+                # Use user-specified constant altitude for all samples
+                alt_km = np.full(len(lats), flight_altitude_m / 1000.0, dtype=float)
+            elif "Altitude" in df.columns:
                 alt_km = (
                     pd.to_numeric(df["Altitude"], errors="coerce").to_numpy() / 1000.0
                 )
