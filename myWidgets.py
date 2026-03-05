@@ -74,33 +74,7 @@ class DataFilterDialog(QDialog):
         self.igrf_altitude = QLineEdit(str(igrf_cfg.get("flight_altitude", 0)))
         form.addRow("Flight Altitude (m):", self.igrf_altitude)
 
-        # --- Micro Levelling ---
-        self.micro_cb = QCheckBox("Micro Levelling")  
-        micro_cfg = self.filters.get("micro_levelling", {})
-        self.micro_cb.setChecked(micro_cfg.get("enabled", False)) 
-        form.addRow(self.micro_cb)
-        short_default = micro_cfg.get(
-            "short_filter_size", micro_cfg.get("window_size", 5)
-        )
-        self.micro_short = QLineEdit(str(short_default))
-        form.addRow("Short Filter Size:", self.micro_short)
-
-        long_default = micro_cfg.get(
-            "long_filter_size", micro_cfg.get("poly_order", 2)
-        )
-        self.micro_long = QLineEdit(str(long_default))
-        form.addRow("Long Filter Size:", self.micro_long)
-
-        self.micro_radius = QLineEdit(str(micro_cfg.get("search_radius", 5)))
-        form.addRow("2D Search Radius:", self.micro_radius)
-
-        self.micro_neighbors = QLineEdit(
-            str(micro_cfg.get("min_neighbor_count", 5))
-        )
-        form.addRow(
-            "Minimum Neighbor Count:", self.micro_neighbors
-        )
-             
+                    
         # --- Median Filter ---
         self.median_cb = QCheckBox("Median Filter")
         med_cfg = self.filters.get("median_filter", {})
@@ -170,6 +144,33 @@ class DataFilterDialog(QDialog):
         # Set initial state of the button
         self.update_load_button_state(self.cal_cb.checkState())
         self.update_diurnal_cb_state(self.diurnal_cb.checkState())
+
+        # --- Micro Levelling ---
+        self.micro_cb = QCheckBox("Micro Levelling")  
+        micro_cfg = self.filters.get("micro_levelling", {})
+        self.micro_cb.setChecked(micro_cfg.get("enabled", False)) 
+        form.addRow(self.micro_cb)
+        short_default = micro_cfg.get(
+            "short_filter_size", micro_cfg.get("window_size", 5)
+        )
+        self.micro_short = QLineEdit(str(short_default))
+        form.addRow("Short Filter Size:", self.micro_short)
+
+        long_default = micro_cfg.get(
+            "long_filter_size", micro_cfg.get("poly_order", 2)
+        )
+        self.micro_long = QLineEdit(str(long_default))
+        form.addRow("Long Filter Size:", self.micro_long)
+
+        self.micro_radius = QLineEdit(str(micro_cfg.get("search_radius", 5)))
+        form.addRow("2D Search Radius:", self.micro_radius)
+
+        self.micro_neighbors = QLineEdit(
+            str(micro_cfg.get("min_neighbor_count", 5))
+        )
+        form.addRow(
+            "Minimum Neighbor Count:", self.micro_neighbors
+        )
 
         # --- OK button ---
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok)

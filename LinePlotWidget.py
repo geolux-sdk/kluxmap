@@ -481,7 +481,12 @@ class LinePlotWidget(QWidget):
 
         for i, row in df.iterrows():
             for j, value in enumerate(row):
-                item = QTableWidgetItem(str(value))
+                if isinstance(value, (float, np.floating)):
+                    # Show floats in fixed-point (no scientific notation)
+                    val_str = f"{value:.6f}"
+                else:
+                    val_str = str(value)
+                item = QTableWidgetItem(val_str)
                 self.tableWidget.setItem(i, j, item)
 
     def on_table_cell_clicked(self, row, column_index):
@@ -746,6 +751,7 @@ class LinePlotWidget(QWidget):
             filtered_mag = self._apply_median(df, filtered_mag, settings, key)
             filtered_mag = self._apply_lowpass(df, filtered_mag, settings, key)
             self._apply_calibration(df, filtered_mag, settings, key)
+            
         # filtered_mag = self._apply_micro_levelling(df, filtered_mag, settings, key)
             
         self.on_item_clicked(current_item)
@@ -766,7 +772,61 @@ class LinePlotWidget(QWidget):
                 logger.debug(f"Loaded {csv_file}")
             except Exception as e:
                 logger.error(f"Error loading {csv_file}: {e}")
-        return pd.concat(df_list, ignore_index=True) if df_list else pd.DataFrame()
+        if not df_list:
+            QMessageBox.warning(
+                self,
+                "Diurnal Data Error",
+                f"An error occurred while processing diurnal data:\n{e}\n\n"
+                "Mag values were zeroed so filtering can continue.",
+            )
+            return pd.DataFrame()
+
+        diurnal_df = pd.concat(df_list, ignore_index=True)
+        try:
+            diurnal_df["Mag"] = pd.to_numeric(diurnal_df["Mag"], errors="coerce")
+            # Drop sentinel values (e.g., missing data coded as 99999.00)
+            drop_mask = diurnal_df["Mag"] == 99999.0
+            if drop_mask.any():
+                removed = int(drop_mask.sum())
+                diurnal_df = diurnal_df.loc[~drop_mask].copy()
+                logger.warning(f"Removed {removed} diurnal rows with Mag=99999.00")
+            if diurnal_df.empty:
+                logger.warning("All diurnal rows were filtered out; returning empty DataFrame.")
+                QMessageBox.warning(
+                    self,
+                    "Diurnal Data Error",
+                    f"An error occurred while processing diurnal data:\n{e}\n\n"
+                    "Mag values were zeroed so filtering can continue.",
+                )
+                return pd.DataFrame()
+
+            mag_mean = diurnal_df["Mag"].mean()
+            diurnal_df["Mag"] = diurnal_df["Mag"] - mag_mean
+            logger.debug(f"Diurnal mean={mag_mean:.3f} subtracted from Mag column")
+
+            # Check overlapping timestamps across merged files (Date + Time)
+            if {"Date", "Time"}.issubset(diurnal_df.columns):
+                dt_series = pd.to_datetime(
+                    diurnal_df["Date"].astype(str) + " " + diurnal_df["Time"].astype(str),
+                    errors="coerce",
+                )
+                dup_mask = dt_series.duplicated(keep=False)
+                dup_count = int(dup_mask.sum())
+                if dup_count:
+                    logger.warning(
+                        f"Diurnal data contains {dup_count} overlapping timestamps"
+                    )
+        except Exception as e:
+            logger.error(f"Mean subtraction failed for diurnal data: {e}")
+            # If any error occurs, zero out Mag values to allow downstream processing.
+            QMessageBox.warning(
+                self,
+                "Diurnal Data Error",
+                f"An error occurred while processing diurnal data:\n{e}\n\n"
+                "Mag values were zeroed so filtering can continue.",
+            )
+            return pd.DataFrame()
+        return diurnal_df
 
     def _reset_filter_columns(self, df: pd.DataFrame):
         cols_to_drop = [
@@ -782,10 +842,11 @@ class LinePlotWidget(QWidget):
 
     def _apply_diurnal(self, df, filtered_mag, settings, diurnal_df, key):
         diurnal_cfg = settings.get("Diurnal_Correction", {})
-        if not diurnal_cfg.get("enabled", False) or diurnal_df.empty:
+        # diurnal_df can be 0 if _load_diurnal_df failed
+        if not diurnal_cfg.get("enabled", False) or not isinstance(diurnal_df, pd.DataFrame) or diurnal_df.empty:
             return filtered_mag
         try:
-            reference_value = diurnal_df["Mag"][0].astype(float)
+            # reference_value = diurnal_df["Mag"][0].astype(float)
             merged = pd.merge(
                 df,
                 diurnal_df[["Date", "Time", "Mag"]],
@@ -796,7 +857,7 @@ class LinePlotWidget(QWidget):
             merged["Mag_corrected"] = (
                 merged["Mag"].astype(float)
                 - merged["Mag_diurnal"].astype(float)
-                + reference_value
+                # + reference_value
             )
             df["Diurnal"] = merged["Mag_diurnal"]
             df["Mag_diurnal"] = merged["Mag_corrected"]
