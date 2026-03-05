@@ -75,6 +75,7 @@ igrf                 - Calculate IGRF model values (geodetic input/output)
 import numpy as np
 import pandas as pd
 import os
+from functools import lru_cache
 
 basepath = os.path.dirname(__file__)
 shc_fn = basepath + '/IGRF14.shc' # Default shc file
@@ -226,6 +227,12 @@ def get_legendre(theta, keys):
     return Pmat, dPmat    
 
 
+@lru_cache(maxsize=4)
+def _read_shc_cached(filename):
+    """Read .shc file and cache the parsed DataFrames to avoid repeat disk I/O."""
+    return _read_shc_uncached(filename)
+
+
 def read_shc(filename = shc_fn):
     """ 
     Read .shc (spherical harmonic coefficient) file
@@ -254,6 +261,11 @@ def read_shc(filename = shc_fn):
     .shc file).
     """
 
+    return _read_shc_cached(os.path.abspath(filename))
+
+
+def _read_shc_uncached(filename = shc_fn):
+    """Uncached reader for .shc files (use read_shc for the cached version)."""
     header = 2
     coeffdict = {}
     with open(filename, 'r') as f:
@@ -545,9 +557,11 @@ def igrf_gc(r, theta, phi, date, coeff_fn = shc_fn, min_degree=1, max_degree=13)
     Btheta = G.dot(np.hstack((g.values, h.values)).T).T # shape (n_times, n_coords)
 
     # calculate Bphi:
-    G  = - N_map * (RE / r) ** (nn + 1) * mm * np.hstack((-P * sinmphi, P * cosmphi)) \
-         * RE / r / np.sin(np.radians(theta))
-    Bphi = G.dot(np.hstack((g.values, h.values)).T).T # shape (n_times, n_coords)
+    # Silence pole warnings (sin(theta)=0) because the grid may include poles during benchmarking.
+    with np.errstate(divide='ignore', invalid='ignore'):
+        G  = - N_map * (RE / r) ** (nn + 1) * mm * np.hstack((-P * sinmphi, P * cosmphi)) \
+             * RE / r / np.sin(np.radians(theta))
+        Bphi = G.dot(np.hstack((g.values, h.values)).T).T # shape (n_times, n_coords)
 
     # reshape and return
     outshape = tuple([Bphi.shape[0]] + list(shape))
@@ -779,23 +793,36 @@ def get_inclination_declination(Be, Bn, Bu, degrees=True):
 if __name__ == '__main__':
 
     from datetime import datetime
+    from time import perf_counter
 
-    # GEODETIC
-    lon = 5.32415  # degrees east
-    lat = 60.39299 # degrees north
-    h   = 0        # kilometers above sea level
-    date = datetime(2021, 3, 28)
-    Be, Bn, Bu = igrf(lon, lat, h, date) # returns east, north, up
+    def benchmark_igrf(iterations=20):
+        """
+        Quick wall‑clock benchmark for igrf over a modest grid.
 
-    # GEOCENTRIC
-    r     = 6500 # kilometers from center of Earht
-    theta = 30   # colatitude in degrees
-    phi   = 4    # degrees east (same as lon)
-    Br, Btheta, Bphi = igrf_gc(r, theta, phi, date) # returns radial, south, east
+        Uses a 2° lon/lat grid with two dates to mimic a realistic workload.
+        Prints average / best / worst timings and per‑point throughput so you
+        can compare changes to the implementation or coefficient files.
+        """
+        lon = np.linspace(-180, 180, 181)  # 2° resolution to keep runtime short
+        lat = np.linspace(-90, 90, 91)
+        Lon, Lat = np.meshgrid(lon, lat)
+        h = 0
+        dates = [datetime(2000, 1, 1), datetime(2020, 1, 1)]
 
-    # GRID
-    lon = np.array([20, 120, 220])
-    lat = np.array([[60, 60, 60], [-60, -60, -60]])
-    h   = 0
-    dates = [datetime(y, 1, 1) for y in np.arange(1960, 2021, 20)]
-    Be, Bn, Bu = igrf(lon, lat, h, dates)
+        # warm‑up to exclude one‑time overheads (file I/O, JIT, etc.)
+        igrf(Lon, Lat, h, dates)
+
+        timings = []
+        total_points = Lon.size * len(dates)
+        for _ in range(iterations):
+            t0 = perf_counter()
+            igrf(Lon, Lat, h, dates)
+            timings.append(perf_counter() - t0)
+
+        timings = np.array(timings)
+        avg = timings.mean()
+        print(f'igrf benchmark (grid {Lon.shape}, dates={len(dates)}, iters={iterations})')
+        print(f'  avg: {avg*1e3:.2f} ms | best: {timings.min()*1e3:.2f} ms | worst: {timings.max()*1e3:.2f} ms')
+        print(f'  throughput: {total_points/avg:,.0f} points/s')
+
+    benchmark_igrf()
