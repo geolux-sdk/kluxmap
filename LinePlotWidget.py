@@ -381,7 +381,7 @@ class LinePlotWidget(QWidget):
         self.scatter_ax = self.scatter_fig.add_subplot(111)
 
     def _draw_colorbar_mode(self, val_col):
-        if self.selected_col_name not in [
+        allowed_cols = [
             "Mag",
             "Mag_diurnal",
             "Mag_median",
@@ -389,7 +389,15 @@ class LinePlotWidget(QWidget):
             "Mag_calibrated",
             "Mag_igrf",
             "IGRF",
-        ]:
+            "Mag_Level",
+        ]
+
+        # df의 마지막 컬럼명이 허용 목록에 없으면 기본값 "Mag" 사용
+        if not self.selected_df.empty:
+            last_col = self.selected_df.columns[-1]
+            val_col = last_col if last_col in allowed_cols else "Mag"
+
+        if val_col not in allowed_cols:
             val_col = "Mag"
 
         cmap = plt.get_cmap("jet")
@@ -750,9 +758,21 @@ class LinePlotWidget(QWidget):
             filtered_mag = self._apply_igrf(df, filtered_mag, settings, key)
             filtered_mag = self._apply_median(df, filtered_mag, settings, key)
             filtered_mag = self._apply_lowpass(df, filtered_mag, settings, key)
-            self._apply_calibration(df, filtered_mag, settings, key)
-            
-        # filtered_mag = self._apply_micro_levelling(df, filtered_mag, settings, key)
+            filtered_mag = self._apply_calibration(df, filtered_mag, settings, key)
+        
+        last_col = df.columns[-1] if len(df.columns) else ""
+        if last_col not in [
+            "Mag_diurnal",
+            "Mag_median",
+            "Mag_lowpass",
+            "Mag_calibrated",
+            "Mag_igrf",
+        ]:
+            col_name = "Mag"
+        else:
+            col_name = last_col
+        logger.debug(f"Final filtered column for plotting: {col_name}")
+        filtered_mag = self._apply_micro_levelling(self.scanline_df, settings, col_name)
             
         self.on_item_clicked(current_item)
         return
@@ -832,7 +852,7 @@ class LinePlotWidget(QWidget):
         cols_to_drop = [
             "Mag_diurnal",
             "Mag_median",
-            "Mag_micro",
+            "Mag_level",
             "Mag_lowpass",
             "Mag_calibrated",
             "IGRF",
@@ -980,7 +1000,7 @@ class LinePlotWidget(QWidget):
             )
             return filtered_mag
 
-    def _apply_micro_levelling(self, df, filtered_mag, settings, key):
+    def _apply_micro_levelling(self, scanline_df, settings, col_name):
         """
         Placeholder for micro levelling pipeline.
 
@@ -993,7 +1013,7 @@ class LinePlotWidget(QWidget):
         """
         micro_cfg = settings.get("micro_levelling", {})
         if not micro_cfg.get("enabled", False):
-            return filtered_mag
+            return 
         try:
             short_len = micro_cfg.get("short_filter_size", micro_cfg.get("window_size", 5))
             long_len = micro_cfg.get("long_filter_size", micro_cfg.get("poly_order", 2))
@@ -1001,22 +1021,27 @@ class LinePlotWidget(QWidget):
             min_neighbors = micro_cfg.get("min_neighbor_count", 5)
 
             logger.debug(
-                f"{key}: micro levelling (placeholder) short={short_len}, long={long_len}, "
+                f"micro levelling (placeholder) short={short_len}, long={long_len}, "
                 f"radius={search_radius}, min_neighbors={min_neighbors}"
             )
-            filtered = run_micro_level(filtered_mag, df, short_len, long_len, search_radius, min_neighbors)
-            df["Mag_micro"] = filtered
-
-            return df["Mag_micro"]
+            filtered = run_micro_level(scanline_df, short_len, long_len, search_radius, min_neighbors, col_name)
+            # 기존 순서는 유지하고, 새로운 키만 뒤에 추가
+            for k, v in filtered.items():
+                if k in self.scanline_df:
+                    self.scanline_df[k] = v  # 위치 유지, 값만 갱신
+                else:
+                    self.scanline_df[k] = v  # 새 항목은 맨 뒤에 추가
+            return 
+            
         except Exception as err:
-            logger.error(f"Micro levelling failed for {key}: {err}")
+            logger.error(f"Micro levelling failed for  {err}")
             QMessageBox.warning(
                 self,
                 "Filter Error",
-                f"Micro levelling failed for scanline '{key}':\n{err}",
+                f"Micro levelling failed for scanline \n{err}",
             )
-            return filtered_mag
-
+        return
+    
     def _apply_lowpass(self, df, filtered_mag, settings, key):
         low_cfg = settings.get("lowpass_filter", {})
         if not low_cfg.get("enabled", False):
@@ -1059,6 +1084,7 @@ class LinePlotWidget(QWidget):
 
         df["Mag_calibrated"] = filtered_mag + offset
         logger.debug(f"{key}: applied Calibration (dir={direction}, offset={offset:.2f})")
+        return df["Mag_calibrated"]
 
     # --- Minimal self-test helpers (manual) -------------------------------
     def _selftest_filters(self):
@@ -1131,7 +1157,9 @@ class LinePlotWidget(QWidget):
         try:
             # 모든 데이터프레임 병합
             all_dfs = list(self.scanline_df.values())
-            combined_df = pd.concat(all_dfs, ignore_index=True)
+            # keep column order aligned with the first dataframe
+            combined_df = pd.concat(all_dfs, ignore_index=True, sort=False)
+            combined_df = combined_df.reindex(columns=all_dfs[0].columns)
 
             # 저장 경로 결정
             if not self.scanline_filepaths:

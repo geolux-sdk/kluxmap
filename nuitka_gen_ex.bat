@@ -18,6 +18,7 @@ python -m nuitka "%SRC%" ^
   --file-reference-choice=runtime ^
   --deployment ^
   --include-data-files=./img/*.png=./img/ ^
+  --include-data-files=./IGRF14.shc=./IGRF14.shc ^
   --windows-console-mode=disable ^
   --windows-icon-from-ico=./img/viewer.ico ^
   --output-dir="%OUT_DIR%"
