@@ -946,17 +946,13 @@ class LinePlotWidget(QWidget):
                 logger.warning(f"{key}: IGRF skipped (no valid timestamps)")
                 return filtered_mag
 
-            unique_times = pd.to_datetime(pd.unique(timestamps[valid_idx].dropna()))
-            for ts in sorted(unique_times):
-                ts = pd.Timestamp(ts)
-                mask = (timestamps == ts) & valid_idx & coord_valid
-                if not mask.any():
-                    continue
-                dt = ts.to_pydatetime()
-                Be, Bn, Bu = ppigrf.igrf(lons[mask], lats[mask], alt_km[mask], dt)
-                igrf_vals[mask] = np.linalg.norm(
-                    np.column_stack([Be, Bn, Bu]), axis=1
-                )
+            valid_ts = timestamps[valid_idx].sort_values()
+            ts = pd.Timestamp(valid_ts.iloc[len(valid_ts) // 2])
+            mask = valid_idx & coord_valid
+            Be, Bn, Bu = ppigrf.igrf(
+                lons[mask], lats[mask], alt_km[mask], ts.to_pydatetime()
+            )
+            igrf_vals[mask] = np.linalg.norm(np.column_stack([Be, Bn, Bu]), axis=1)
 
             df["IGRF"] = igrf_vals
             df["Mag_igrf"] = filtered_mag.values - df["IGRF"].values

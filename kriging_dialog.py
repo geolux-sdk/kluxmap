@@ -174,7 +174,7 @@ class KrigingPlotDialog_withHead(QDialog):
         ctrl_layout.addWidget(self.variogram_cb)
 
         self.shade_cb = QCheckBox("Shade")
-        self.shade_cb.setChecked(True)
+        self.shade_cb.setChecked(False)
         ctrl_layout.addWidget(self.shade_cb)
 
         self.contour_cb = QCheckBox("Contour")
@@ -182,7 +182,7 @@ class KrigingPlotDialog_withHead(QDialog):
         ctrl_layout.addWidget(self.contour_cb)
 
         self.scatter_cb = QCheckBox("Scatter")
-        self.scatter_cb.setChecked(True)
+        self.scatter_cb.setChecked(False)
         ctrl_layout.addWidget(self.scatter_cb)
 
         current_variogram = self.filters.get("variogram", "linear")
@@ -355,24 +355,26 @@ class KrigingPlotDialog_withHead(QDialog):
 
             if self.shade_cb.isChecked():
                 # LightSource로 음영을 추가해 가독성을 높인다.
-                ls = LightSource(azdeg=315, altdeg=45)
-                rgb = ls.shade(
+                ls = LightSource(azdeg=225, altdeg=25)
+                shade = ls.hillshade(
                     z_interp,
-                    cmap=plt.get_cmap("jet"),
-                    vert_exag=0.3,
-                    blend_mode="soft",
+                    vert_exag=6.0,
+                    fraction=1.5,
                 )
+                shadow_alpha = np.clip((1.0 - shade) * 0.3, 0.0, 0.3)
+                shadow_rgba = np.zeros(shade.shape + (4,), dtype=float)
+                shadow_rgba[..., 3] = shadow_alpha
                 self.shade_im = self.ax.imshow(
-                    rgb,
+                    shadow_rgba,
                     extent=[grid_min_x, grid_max_x, grid_min_y, grid_max_y],
                     origin="lower",
                     aspect="equal",
-                    alpha=0.35,
                     zorder=self.im.get_zorder() + 1,
                 )
 
             if self.contour_cb.isChecked():
                 # 기본 10개 등고선
+                levels = np.linspace(np.nanmin(z_interp), np.nanmax(z_interp), 10)
                 levels = np.linspace(np.nanmin(z_interp), np.nanmax(z_interp), 10)
                 self.contour_set = self.ax.contour(
                     gx,
