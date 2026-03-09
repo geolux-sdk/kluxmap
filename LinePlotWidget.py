@@ -940,19 +940,34 @@ class LinePlotWidget(QWidget):
 
             igrf_vals = np.full(len(df), np.nan, dtype=float)
 
-            # 날짜별로 묶어서 계산(IGRF는 일 단위 변화가 작으므로 date만 사용)
+            # 샘플별 실제 시각을 반영해 한 번에 계산한 뒤, 각 행-시각 쌍의 대각선 성분만 사용한다.
             valid_idx = ~timestamps.isna()
             if not valid_idx.any():
                 logger.warning(f"{key}: IGRF skipped (no valid timestamps)")
                 return filtered_mag
 
-            valid_ts = timestamps[valid_idx].sort_values()
-            ts = pd.Timestamp(valid_ts.iloc[len(valid_ts) // 2])
             mask = valid_idx & coord_valid
+            valid_lons = lons[mask]
+            valid_lats = lats[mask]
+            valid_alt_km = alt_km[mask]
+            valid_datetimes = timestamps[mask].dt.to_pydatetime()
+
             Be, Bn, Bu = ppigrf.igrf(
-                lons[mask], lats[mask], alt_km[mask], ts.to_pydatetime()
+                valid_lons,
+                valid_lats,
+                valid_alt_km,
+                valid_datetimes,
             )
-            igrf_vals[mask] = np.linalg.norm(np.column_stack([Be, Bn, Bu]), axis=1)
+            igrf_vals[mask] = np.linalg.norm(
+                np.column_stack(
+                    [
+                        np.diagonal(Be),
+                        np.diagonal(Bn),
+                        np.diagonal(Bu),
+                    ]
+                ),
+                axis=1,
+            )
 
             df["IGRF"] = igrf_vals
             df["Mag_igrf"] = filtered_mag.values - df["IGRF"].values
