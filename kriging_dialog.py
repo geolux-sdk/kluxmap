@@ -6,7 +6,8 @@ import pandas as pd
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.colors import LightSource
 from pykrige.ok import OrdinaryKriging
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import QSize, Qt, QTimer
+from PySide6.QtGui import QAction, QIcon
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -20,12 +21,40 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QMessageBox,
     QPushButton,
+    QToolBar,
     QVBoxLayout,
 )
 
+from myResource import resource_path
 from mySettings import config
 
 __all__ = ["ColorbarRangeDialog", "KrigingPlotDialog_withHead", "suggest_params"]
+
+
+def _icon_from_candidates(*names: str) -> QIcon:
+    for name in names:
+        path = resource_path(name)
+        if os.path.exists(path):
+            return QIcon(path)
+    return QIcon()
+
+
+DEFAULT_SHADE_PARAMS = {
+    "azdeg": 225.0,
+    "altdeg": 25.0,
+    "vert_exag": 6.0,
+    "fraction": 1.5,
+    "alpha_scale": 0.3,
+    "alpha_max": 0.3,
+}
+
+DEFAULT_CONTOUR_PARAMS = {
+    "scale": "linear",
+    "levels": 10,
+    "linewidth": 0.6,
+    "alpha": 0.8,
+    "label_fontsize": 7,
+}
 
 
 class ColorbarRangeDialog(QDialog):
@@ -81,6 +110,161 @@ class ColorbarRangeDialog(QDialog):
         self.max_input.setText(f"{max_val:.2f}")
 
 
+class ShadeSettingsDialog(QDialog):
+    """Dialog to edit shade rendering parameters."""
+
+    def __init__(self, parent=None, current_values=None):
+        super().__init__(parent)
+        self.setWindowTitle("Shade Settings")
+        self.restore = dict(DEFAULT_SHADE_PARAMS)
+        self.current_values = dict(self.restore)
+        if current_values:
+            self.current_values.update(current_values)
+
+        layout = QFormLayout(self)
+
+        self.azdeg_input = QLineEdit(str(self.current_values["azdeg"]))
+        self.altdeg_input = QLineEdit(str(self.current_values["altdeg"]))
+        self.vert_exag_input = QLineEdit(str(self.current_values["vert_exag"]))
+        self.fraction_input = QLineEdit(str(self.current_values["fraction"]))
+        self.alpha_scale_input = QLineEdit(str(self.current_values["alpha_scale"]))
+        self.alpha_max_input = QLineEdit(str(self.current_values["alpha_max"]))
+
+        layout.addRow("Azimuth:", self.azdeg_input)
+        layout.addRow("Altitude:", self.altdeg_input)
+        layout.addRow("Vert Exag:", self.vert_exag_input)
+        layout.addRow("Fraction:", self.fraction_input)
+        layout.addRow("Alpha Scale:", self.alpha_scale_input)
+        layout.addRow("Alpha Max:", self.alpha_max_input)
+
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        restore_button = QPushButton("Restore")
+        buttons.addButton(restore_button, QDialogButtonBox.ButtonRole.ActionRole)
+        restore_button.clicked.connect(self.restore_values)
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        layout.addRow(buttons)
+
+    def restore_values(self):
+        self.azdeg_input.setText(str(self.restore["azdeg"]))
+        self.altdeg_input.setText(str(self.restore["altdeg"]))
+        self.vert_exag_input.setText(str(self.restore["vert_exag"]))
+        self.fraction_input.setText(str(self.restore["fraction"]))
+        self.alpha_scale_input.setText(str(self.restore["alpha_scale"]))
+        self.alpha_max_input.setText(str(self.restore["alpha_max"]))
+
+    def get_values(self):
+        try:
+            values = {
+                "azdeg": float(self.azdeg_input.text()),
+                "altdeg": float(self.altdeg_input.text()),
+                "vert_exag": float(self.vert_exag_input.text()),
+                "fraction": float(self.fraction_input.text()),
+                "alpha_scale": float(self.alpha_scale_input.text()),
+                "alpha_max": float(self.alpha_max_input.text()),
+            }
+        except ValueError:
+            QMessageBox.warning(self, "Input Error", "Please enter valid numeric values.")
+            return None
+
+        if not (0.0 <= values["altdeg"] <= 90.0):
+            QMessageBox.warning(self, "Input Error", "Altitude must be between 0 and 90.")
+            return None
+        if values["vert_exag"] <= 0 or values["fraction"] <= 0:
+            QMessageBox.warning(
+                self,
+                "Input Error",
+                "Vert Exag and Fraction must be greater than 0.",
+            )
+            return None
+        if values["alpha_scale"] < 0 or values["alpha_max"] < 0:
+            QMessageBox.warning(
+                self,
+                "Input Error",
+                "Alpha Scale and Alpha Max must be 0 or greater.",
+            )
+            return None
+        return values
+
+
+class ContourSettingsDialog(QDialog):
+    """Dialog to edit contour rendering parameters."""
+
+    def __init__(self, parent=None, current_values=None):
+        super().__init__(parent)
+        self.setWindowTitle("Contour Settings")
+        self.restore = dict(DEFAULT_CONTOUR_PARAMS)
+        self.current_values = dict(self.restore)
+        if current_values:
+            self.current_values.update(current_values)
+
+        layout = QFormLayout(self)
+
+        self.scale_combo = QComboBox()
+        self.scale_combo.addItems(["linear", "log"])
+        self.scale_combo.setCurrentText(str(self.current_values["scale"]).lower())
+        self.levels_input = QLineEdit(str(self.current_values["levels"]))
+        self.linewidth_input = QLineEdit(str(self.current_values["linewidth"]))
+        self.alpha_input = QLineEdit(str(self.current_values["alpha"]))
+        self.label_fontsize_input = QLineEdit(str(self.current_values["label_fontsize"]))
+
+        layout.addRow("Scale:", self.scale_combo)
+        layout.addRow("Levels:", self.levels_input)
+        layout.addRow("Line Width:", self.linewidth_input)
+        layout.addRow("Alpha:", self.alpha_input)
+        layout.addRow("Label Font:", self.label_fontsize_input)
+
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        restore_button = QPushButton("Restore")
+        buttons.addButton(restore_button, QDialogButtonBox.ButtonRole.ActionRole)
+        restore_button.clicked.connect(self.restore_values)
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        layout.addRow(buttons)
+
+    def restore_values(self):
+        self.scale_combo.setCurrentText(str(self.restore["scale"]).lower())
+        self.levels_input.setText(str(self.restore["levels"]))
+        self.linewidth_input.setText(str(self.restore["linewidth"]))
+        self.alpha_input.setText(str(self.restore["alpha"]))
+        self.label_fontsize_input.setText(str(self.restore["label_fontsize"]))
+
+    def get_values(self):
+        try:
+            values = {
+                "scale": self.scale_combo.currentText().lower(),
+                "levels": int(self.levels_input.text()),
+                "linewidth": float(self.linewidth_input.text()),
+                "alpha": float(self.alpha_input.text()),
+                "label_fontsize": float(self.label_fontsize_input.text()),
+            }
+        except ValueError:
+            QMessageBox.warning(self, "Input Error", "Please enter valid contour values.")
+            return None
+
+        if values["levels"] < 2:
+            QMessageBox.warning(self, "Input Error", "Levels must be 2 or greater.")
+            return None
+        if values["linewidth"] <= 0:
+            QMessageBox.warning(self, "Input Error", "Line Width must be greater than 0.")
+            return None
+        if not (0.0 <= values["alpha"] <= 1.0):
+            QMessageBox.warning(self, "Input Error", "Alpha must be between 0 and 1.")
+            return None
+        if values["label_fontsize"] <= 0:
+            QMessageBox.warning(
+                self,
+                "Input Error",
+                "Label Font must be greater than 0.",
+            )
+            return None
+        return values
+
+
 def suggest_params(x, y, z, model: str):
     xs = np.asarray(x)
     ys = np.asarray(y)
@@ -129,6 +313,8 @@ class KrigingPlotDialog_withHead(QDialog):
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         self.resize(800, 600)
         self.filters = config.get("kriging", {})
+        self.filters.setdefault("shade_params", dict(DEFAULT_SHADE_PARAMS))
+        self.filters.setdefault("contour_params", dict(DEFAULT_CONTOUR_PARAMS))
         self.contour_set = None
         self.shade_im = None
         self.colorbar = None
@@ -181,7 +367,7 @@ class KrigingPlotDialog_withHead(QDialog):
         self.contour_cb.setChecked(False)
         ctrl_layout.addWidget(self.contour_cb)
 
-        self.scatter_cb = QCheckBox("Scatter")
+        self.scatter_cb = QCheckBox("Flight Path")
         self.scatter_cb.setChecked(False)
         ctrl_layout.addWidget(self.scatter_cb)
 
@@ -245,6 +431,7 @@ class KrigingPlotDialog_withHead(QDialog):
         save_btn.clicked.connect(self.save_plot)
         ctrl_layout.addWidget(save_btn)
 
+        layout.addWidget(self.create_toolbar())
         layout.addLayout(ctrl_layout)
 
         self.fig, self.ax = plt.subplots()
@@ -260,6 +447,71 @@ class KrigingPlotDialog_withHead(QDialog):
         self.grid_size_x_max.setText(str(self.filters.get("grid_max_x", default_max_x)))
         self.grid_size_y_min.setText(str(self.filters.get("grid_min_y", default_min_y)))
         self.grid_size_y_max.setText(str(self.filters.get("grid_max_y", default_max_y)))
+
+    def create_toolbar(self):
+        self.toolbar = QToolBar(self)
+        self.toolbar.setIconSize(QSize(24, 24))
+        self.toolbar.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextUnderIcon)
+
+        self.actionShade = QAction(
+            _icon_from_candidates("imag_shdow.png", "imag_Shadow.png", "imag_Shadow_2.png"),
+            "Shade",
+            self,
+        )
+        self.actionContour = QAction(
+            _icon_from_candidates("imag_countour.png", "imag_contour.png"),
+            "Contour",
+            self,
+        )
+        self.actionKmlExport = QAction(
+            _icon_from_candidates("imag_kml_export.png"),
+            "KML Export",
+            self,
+        )
+        self.toolbar.actionTriggered.connect(self.on_toolbar_action_triggered)
+
+        self.toolbar.addAction(self.actionShade)
+        self.toolbar.addAction(self.actionContour)
+        self.toolbar.addAction(self.actionKmlExport)
+        return self.toolbar
+
+    def on_toolbar_action_triggered(self, action):
+        if action == self.actionShade:
+            self.open_shade_settings()
+        elif action == self.actionContour:
+            self.open_contour_settings()
+
+    def open_shade_settings(self):
+        dlg = ShadeSettingsDialog(
+            self,
+            current_values=self.filters.get("shade_params", DEFAULT_SHADE_PARAMS),
+        )
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+
+        values = dlg.get_values()
+        if values is None:
+            return
+
+        self.filters["shade_params"] = values
+        self.shade_cb.setChecked(True)
+        self.run_kriging()
+
+    def open_contour_settings(self):
+        dlg = ContourSettingsDialog(
+            self,
+            current_values=self.filters.get("contour_params", DEFAULT_CONTOUR_PARAMS),
+        )
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+
+        values = dlg.get_values()
+        if values is None:
+            return
+
+        self.filters["contour_params"] = values
+        self.contour_cb.setChecked(True)
+        self.run_kriging()
 
     def save_plot(self):
         if not hasattr(self, "fig"):
@@ -355,13 +607,22 @@ class KrigingPlotDialog_withHead(QDialog):
 
             if self.shade_cb.isChecked():
                 # LightSource로 음영을 추가해 가독성을 높인다.
-                ls = LightSource(azdeg=225, altdeg=25)
+                shade_params = dict(DEFAULT_SHADE_PARAMS)
+                shade_params.update(self.filters.get("shade_params", {}))
+                ls = LightSource(
+                    azdeg=shade_params["azdeg"],
+                    altdeg=shade_params["altdeg"],
+                )
                 shade = ls.hillshade(
                     z_interp,
-                    vert_exag=6.0,
-                    fraction=1.5,
+                    vert_exag=shade_params["vert_exag"],
+                    fraction=shade_params["fraction"],
                 )
-                shadow_alpha = np.clip((1.0 - shade) * 0.3, 0.0, 0.3)
+                shadow_alpha = np.clip(
+                    (1.0 - shade) * shade_params["alpha_scale"],
+                    0.0,
+                    shade_params["alpha_max"],
+                )
                 shadow_rgba = np.zeros(shade.shape + (4,), dtype=float)
                 shadow_rgba[..., 3] = shadow_alpha
                 self.shade_im = self.ax.imshow(
@@ -373,19 +634,48 @@ class KrigingPlotDialog_withHead(QDialog):
                 )
 
             if self.contour_cb.isChecked():
-                # 기본 10개 등고선
-                levels = np.linspace(np.nanmin(z_interp), np.nanmax(z_interp), 10)
-                levels = np.linspace(np.nanmin(z_interp), np.nanmax(z_interp), 10)
-                self.contour_set = self.ax.contour(
-                    gx,
-                    gy,
-                    z_interp,
-                    levels=levels,
-                    colors="black",
-                    linewidths=0.6,
-                    alpha=0.8,
-                )
-                self.ax.clabel(self.contour_set, fmt="%.1f", fontsize=7, inline=True)
+                contour_params = dict(DEFAULT_CONTOUR_PARAMS)
+                contour_params.update(self.filters.get("contour_params", {}))
+                z_min = float(np.nanmin(z_interp))
+                z_max = float(np.nanmax(z_interp))
+
+                if contour_params["scale"] == "log":
+                    if z_min <= 0 or z_max <= 0:
+                        QMessageBox.warning(
+                            self,
+                            "Contour Warning",
+                            "Log Scale contour requires positive interpolated values.",
+                        )
+                        levels = None
+                    else:
+                        levels = np.geomspace(
+                            z_min,
+                            z_max,
+                            int(contour_params["levels"]),
+                        )
+                else:
+                    levels = np.linspace(
+                        z_min,
+                        z_max,
+                        int(contour_params["levels"]),
+                    )
+
+                if levels is not None:
+                    self.contour_set = self.ax.contour(
+                        gx,
+                        gy,
+                        z_interp,
+                        levels=levels,
+                        colors="black",
+                        linewidths=contour_params["linewidth"],
+                        alpha=contour_params["alpha"],
+                    )
+                    self.ax.clabel(
+                        self.contour_set,
+                        fmt="%.1f",
+                        fontsize=contour_params["label_fontsize"],
+                        inline=True,
+                    )
 
             if self.scatter_cb.isChecked():
                 # 원본 측정 위치를 겹쳐서 표시
