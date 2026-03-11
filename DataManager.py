@@ -9,6 +9,10 @@ import pandas as pd
 from loguru import logger
 from shapely.geometry import Point, Polygon
 
+from direction_utils import (
+    heading_from_deltas,
+    heading_matches_project_directions,
+)
 from mySettings import config
 from segment_utils import normalize_intervals
 
@@ -689,7 +693,7 @@ class DataManager:
                 continue
             dx = float(g["X"].iloc[-1]) - float(g["X"].iloc[0])
             dy = float(g["Y"].iloc[-1]) - float(g["Y"].iloc[0])
-            angle = (np.degrees(np.arctan2(dx, dy)) + 360.0) % 360.0  # Bearing
+            angle = heading_from_deltas(dx, dy)
             groups.append(
                 {
                     "gid": gid,
@@ -744,28 +748,17 @@ class DataManager:
         if "X" not in df.columns or "Y" not in df.columns:
             raise ValueError("DataFrame must contain 'X' and 'Y' columns.")
 
-        dx = df["X"].diff()
-        dy = df["Y"].diff()
-
-        # Compute movement direction (north-based, clockwise).
-        directions = (np.degrees(np.arctan2(dx, dy)) + 360) % 360
+        dx = df["X"].diff().to_numpy()
+        dy = df["Y"].diff().to_numpy()
+        directions = pd.Series(heading_from_deltas(dx, dy), index=df.index, dtype=float)
         directions.iloc[0] = np.nan  # Exclude the first row.
-
-        # Reference angles: east, west, south, north.
-        targets = [0 + degree, 90 + degree, 180 + degree, 270 + degree]
-
-        # Build the mask for angles that fall within the tolerance.
-        mask = pd.Series(False, index=df.index)
-        for target in targets:
-            lower = (target - tolerance_deg) % 360
-            upper = (target + tolerance_deg) % 360
-
-            if lower < upper:
-                mask |= (directions >= lower) & (directions <= upper)
-            else:
-                # Handle wrapped ranges that cross 360 degrees.
-                mask |= (directions >= lower) | (directions <= upper)
-
+        mask = pd.Series(
+            heading_matches_project_directions(
+                directions.to_numpy(), degree, tolerance_deg
+            ),
+            index=df.index,
+        )
+        mask &= directions.notna()
         return df[mask.fillna(False)].copy()
 
     def filter_intervals_by_endpoint_angle(
@@ -787,12 +780,6 @@ class DataManager:
         if not intervals:
             return work.iloc[0:0]
 
-        targets = [0 + degree, 90 + degree, 180 + degree, 270 + degree]
-
-        def ang_diff(a, b):
-            d = abs(a - b) % 360.0
-            return min(d, 360.0 - d)
-
         keep_masks = []
         for start, end in intervals:
             mask = (work["record_id"] >= start) & (work["record_id"] < end)
@@ -806,10 +793,10 @@ class DataManager:
                 continue
             dx = ex - sx
             dy = ey - sy
-            if dx == 0 and dy == 0:
+            angle = heading_from_deltas(dx, dy)
+            if angle is None:
                 continue
-            angle = (np.degrees(np.arctan2(dx, dy)) + 360.0) % 360.0
-            if any(ang_diff(angle, tgt) <= tolerance_deg for tgt in targets):
+            if heading_matches_project_directions(angle, degree, tolerance_deg):
                 keep_masks.append(mask)
 
         if not keep_masks:

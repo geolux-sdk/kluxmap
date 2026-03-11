@@ -102,28 +102,36 @@ class DataFilterDialog(QDialog):
             0, 1
         )  # Push the value column to the right.
         # Row 1 (match Calibration Flight order: vertical first)
-        self.td_input = QLineEdit("0")  # Top -> Down
+        self.td_input = QLineEdit(
+            self._format_offset_text(cali_cfg.get("offset_TD", 0.0))
+        )  # Top -> Down
         grid.addWidget(
             QLabel("Top -> Down"), 1, 1, alignment=Qt.AlignmentFlag.AlignCenter
         )
         grid.addWidget(self.td_input, 1, 2)
 
         # Row 2
-        self.bu_input = QLineEdit("0")  # Bottom -> Up
+        self.bu_input = QLineEdit(
+            self._format_offset_text(cali_cfg.get("offset_BU", 0.0))
+        )  # Bottom -> Up
         grid.addWidget(
             QLabel("Down -> Top"), 2, 1, alignment=Qt.AlignmentFlag.AlignCenter
         )
         grid.addWidget(self.bu_input, 2, 2)
 
         # Row 3
-        self.lr_input = QLineEdit("0")  # Left -> Right
+        self.lr_input = QLineEdit(
+            self._format_offset_text(cali_cfg.get("offset_LR", 0.0))
+        )  # Left -> Right
         grid.addWidget(
             QLabel("Left -> Right"), 3, 1, alignment=Qt.AlignmentFlag.AlignCenter
         )
         grid.addWidget(self.lr_input, 3, 2)
 
         # Row 4
-        self.rl_input = QLineEdit("0")  # Right -> Left
+        self.rl_input = QLineEdit(
+            self._format_offset_text(cali_cfg.get("offset_RL", 0.0))
+        )  # Right -> Left
         grid.addWidget(
             QLabel("Right -> Left"), 4, 1, alignment=Qt.AlignmentFlag.AlignCenter
         )
@@ -197,15 +205,21 @@ class DataFilterDialog(QDialog):
         self.td_input.setEnabled(is_checked)
         self.bu_input.setEnabled(is_checked)
 
+    def _format_offset_text(self, value):
+        try:
+            return f"{float(value):.5f}"
+        except (TypeError, ValueError):
+            return str(value)
+
     def calc_calibration_data(self):
         self.parentWidget.calculate_directional_avg_from_df()
         # Reload the latest calculated values from config into the form.
         filters_line = config.get("filters_line", {})
         cali_cfg = filters_line.get("cali_filter", self.filters.get("cali_filter", {}))
-        self.bu_input.setText(str(cali_cfg.get("offset_BU", 0.0)))
-        self.td_input.setText(str(cali_cfg.get("offset_TD", 0.0)))
-        self.lr_input.setText(str(cali_cfg.get("offset_LR", 0.0)))
-        self.rl_input.setText(str(cali_cfg.get("offset_RL", 0.0)))
+        self.bu_input.setText(self._format_offset_text(cali_cfg.get("offset_BU", 0.0)))
+        self.td_input.setText(self._format_offset_text(cali_cfg.get("offset_TD", 0.0)))
+        self.lr_input.setText(self._format_offset_text(cali_cfg.get("offset_LR", 0.0)))
+        self.rl_input.setText(self._format_offset_text(cali_cfg.get("offset_RL", 0.0)))
 
     def _read_calibration_file(self, file_path):
         """Parse calibration.txt and return a direction-to-value mapping.
@@ -236,16 +250,16 @@ class DataFilterDialog(QDialog):
 
             # Support both legacy labels (EW/WE/NS/SN) and new labels (RL/LR/TD/BU).
             self.rl_input.setText(
-                cal_values.get("RL", cal_values.get("RL", "0"))
+                self._format_offset_text(cal_values.get("RL", "0"))
             )
             self.lr_input.setText(
-                cal_values.get("LR", cal_values.get("LR", "0"))
+                self._format_offset_text(cal_values.get("LR", "0"))
             )
             self.td_input.setText(
-                cal_values.get("TD", cal_values.get("TD", "0"))
+                self._format_offset_text(cal_values.get("TD", "0"))
             )
             self.bu_input.setText(
-                cal_values.get("BU", cal_values.get("BU", "0"))
+                self._format_offset_text(cal_values.get("BU", "0"))
             )
 
             QMessageBox.information(

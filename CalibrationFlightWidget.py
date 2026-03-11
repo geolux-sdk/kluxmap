@@ -1,5 +1,4 @@
 import os
-import math
 from typing import Optional
 import matplotlib.pyplot as plt
 import numpy as np
@@ -30,6 +29,7 @@ from PySide6.QtWidgets import (
 )
 
 from DataManager import DataManager
+from direction_utils import classify_points
 from myResource import resource_path
 from mySettings import config
 
@@ -341,23 +341,12 @@ class CalibrationFlightWidget(QWidget):
             start_x, end_x = segment_df["X"].iloc[0], segment_df["X"].iloc[-1]
             start_y, end_y = segment_df["Y"].iloc[0], segment_df["Y"].iloc[-1]
 
-            dx = end_x - start_x
-            dy = end_y - start_y
-
-            # heading_deg uses north as 0 degrees and increases clockwise.
-            heading_deg = (math.degrees(math.atan2(dx, dy)) + 360) % 360
             main_deg = getattr(self, "_main_direction_degree", 0) or 0
-            diff = (heading_deg - main_deg + 360) % 360
-
-            # Classify the segment into one of the four flight directions.
-            if diff <= 45 or diff > 315:
-                direction = "BU"  # along main direction
-            elif diff <= 135:
-                direction = "LR"  # 90 degrees clockwise from main
-            elif diff <= 225:
-                direction = "TD"  # opposite to main
-            else:
-                direction = "RL"  # 270 degrees from main (counter-clockwise)
+            direction = classify_points(
+                start_x, start_y, end_x, end_y, main_deg
+            )
+            if direction is None:
+                continue
 
             directional_mags[direction].append(avg_mag)
             direction_colors[direction].append(color)

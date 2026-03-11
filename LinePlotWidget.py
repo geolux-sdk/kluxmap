@@ -36,6 +36,7 @@ from PySide6.QtWidgets import (
 from scipy.signal import butter, filtfilt
 
 from DataManager import DataManager, Source
+from direction_utils import classify_points
 
 from myResource import resource_path
 from mySettings import config
@@ -273,19 +274,22 @@ class LinePlotWidget(QWidget):
         # Average Mag values by direction (TD/BU/LR/RL).
         sums = {"TD": 0.0, "BU": 0.0, "LR": 0.0, "RL": 0.0}
         counts = {"TD": 0, "BU": 0, "LR": 0, "RL": 0}
+        main_direction_degree = config.get("direction", 0)
 
         for name, df in self.scanline_df.items():
             if df.empty or not {"Mag", "X", "Y"}.issubset(df.columns):
                 continue
 
             mag_avg = float(df["Mag"].mean())
-            dx = df["X"].iloc[-1] - df["X"].iloc[0]
-            dy = df["Y"].iloc[-1] - df["Y"].iloc[0]
-
-            if abs(dx) >= abs(dy):
-                direction = "LR" if dx > 0 else "RL"
-            else:
-                direction = "BU" if dy > 0 else "TD"
+            direction = classify_points(
+                float(df["X"].iloc[0]),
+                float(df["Y"].iloc[0]),
+                float(df["X"].iloc[-1]),
+                float(df["Y"].iloc[-1]),
+                main_direction_degree,
+            )
+            if direction is None:
+                continue
 
             sums[direction] += mag_avg
             counts[direction] += 1
@@ -1096,13 +1100,17 @@ class LinePlotWidget(QWidget):
 
         start_x, end_x = df["X"].iloc[0], df["X"].iloc[-1]
         start_y, end_y = df["Y"].iloc[0], df["Y"].iloc[-1]
-        dx = end_x - start_x
-        dy = end_y - start_y
-
-        if abs(dx) > abs(dy):
-            direction = "LR" if dx > 0 else "RL"
-        else:
-            direction = "BU" if dy > 0 else "TD"
+        main_direction_degree = config.get("direction", 0)
+        direction = classify_points(
+            float(start_x),
+            float(start_y),
+            float(end_x),
+            float(end_y),
+            main_direction_degree,
+        )
+        if direction is None:
+            logger.warning(f"{key}: Calibration skipped (zero-length direction vector)")
+            return
 
         offset_key = f"offset_{direction}"
         offset = cal_cfg.get(offset_key, 0.0)
