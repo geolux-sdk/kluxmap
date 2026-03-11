@@ -22,7 +22,6 @@ from mySettings import config
 class ConvertDataDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
-        logger.debug("ConvertDataDialog.__init__")
         self.setWindowTitle("Data Load")
 
         # ---- defaults & cfg ----
@@ -524,9 +523,9 @@ class ConvertDataDialog(QDialog):
         try:
             config.set("dataloaddlg", new_cfg)
             config.save()
-        except Exception as e:
+        except Exception:
             # 저장 실패는 다이얼로그 진행 자체를 막을 필요는 없다고 판단(로그는 호출측에서)
-            logger.error(f"ConvertDataDialog._on_accept: {repr(e)}")
+            logger.exception("Failed to save data load dialog settings")
             pass
 
         # 선택 결과 보관 후 accept
@@ -548,9 +547,6 @@ class Converter(QThread):
         self.folder = folder or ""
         self.selection = selection or {}
         self._cancel = False
-        logger.debug(
-            f"[Converter.__init__] files={self.files}, folder={self.folder}, selection={self.selection}"
-        )
         self.MagHawkConverter = DataConverter()
         proj_path = config.get("project_path")
         saveto = self.selection.get("saveto")
@@ -567,7 +563,6 @@ class Converter(QThread):
         dev = self.selection.get("device") or ""
         option = self.selection.get("option") or {}
         mode = option.get("mode") or ""
-        logger.debug(f"{dev=}, {option=}, {mode=}")
         # Arrow는 파일 다중 선택
         if "Mag Arrow" in dev:
             return list(self.files)
@@ -585,13 +580,11 @@ class Converter(QThread):
         results = []
         for p in patterns:
             results.extend(glob.glob(os.path.join(self.folder, p)))
-            # logger.debug(f"{results=}")
         return sorted(set(results))
 
     def run(self):
         try:
             targets = self._collect_files()
-            # logger.debug(f"[Converter.run] targets={targets}")
             n = len(targets)
 
             # 다이얼로그에 전체 개수 알림 + 진행 0으로 초기화
@@ -600,11 +593,15 @@ class Converter(QThread):
 
             if n == 0:
                 msg = "No input files to convert."
+                logger.warning("Conversion aborted because no input files were found")
                 self.text.emit(msg)
                 self.failed.emit(msg)
                 return
 
             device = self.selection.get("device")
+            logger.info(
+                f"Starting data conversion: device={device}, files={n}, destination={self.saved_folder_path}"
+            )
             if device[:8] == "Mag Hawk":
                 parent_dir = os.path.dirname(targets[0])
                 last_folder = os.path.basename(parent_dir)
@@ -615,6 +612,7 @@ class Converter(QThread):
             for i, fpath in enumerate(targets, start=1):
                 if self._cancel:
                     msg = "Conversion cancelled by user."
+                    logger.warning("Data conversion cancelled by user")
                     self.text.emit(msg)
                     self.failed.emit(msg)
                     return
@@ -637,6 +635,9 @@ class Converter(QThread):
                     processed_dir, self.saved_folder_path, "1Hz"
                 )
 
+            logger.info(
+                f"Completed data conversion: device={device}, files={n}, destination={self.saved_folder_path}"
+            )
             self.text.emit("Done")
             self.finished_ok.emit()
 

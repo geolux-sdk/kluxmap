@@ -1,6 +1,5 @@
 import os
 import math
-from pathlib import Path
 from typing import Optional
 import matplotlib.pyplot as plt
 import numpy as np
@@ -11,7 +10,6 @@ from matplotlib.figure import Figure
 from PySide6.QtCore import Qt, QSize, Slot
 from PySide6.QtGui import QAction, QIcon
 from PySide6.QtWidgets import (
-    QApplication,
     QMenu,
     QListWidget,
     QFileDialog,
@@ -24,7 +22,6 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QSizePolicy,
-    QStyle,
     QToolBar,
     QVBoxLayout,
     QWidget,
@@ -46,7 +43,7 @@ class CalibrationFlightWidget(QWidget):
         self.main_window: Optional[QWidget] = main_window
 
         self.df = pd.DataFrame()
-        # 선택한 두 지점을 기억할 리스트
+        # Remember picked scatter positions for the current interaction.
         self._sel_positions = []
         self._selected_lines = []
         self._selected_files = []
@@ -110,7 +107,6 @@ class CalibrationFlightWidget(QWidget):
         self.actionOpenCaliFolder.setEnabled(action)
 
     def openCalibrationFlightFolder(self):
-        logger.debug("openCalibrationFlightFolder")
         project_path = config.get("project_path", "")
         if not project_path:
             QMessageBox.warning(self, "ERROR", "Open a project folder first.")
@@ -129,12 +125,14 @@ class CalibrationFlightWidget(QWidget):
             dir=path,
             filter="Flight data (*.csv);;All files (*)",
         )
-        logger.debug(f"Selected files: {files}")
 
         if not files:
             return
 
         self._selected_files = files
+        logger.info(
+            f"Loaded {len(files)} calibration flight file(s) from {path}"
+        )
         self.updateFileList(files)
         self.df = self.db.merge_CSVtodf(files)
         self.update_plots(self.df)
@@ -149,7 +147,7 @@ class CalibrationFlightWidget(QWidget):
         self.scatter_ax.grid(True)
 
         self.scatter_canvas = FigureCanvas(self.scatter_fig)
-        # 마우스 클릭 이벤트 연결
+        # Connect mouse interaction handlers.
         self.scatter_canvas.mpl_connect("motion_notify_event", self._on_mouse_move)
         self.scatter_canvas.mpl_connect("button_press_event", self._on_scatter_select)
         self.scatter_canvas.mpl_connect("scroll_event", self._on_scroll_zoom)
@@ -162,15 +160,12 @@ class CalibrationFlightWidget(QWidget):
         # Top plot (row 1 of 2)
         self.ax_mag = self.fig.add_subplot(2, 1, 1)
         self.ax_mag.set_title("Mag Plot")
-        # … any default formatting for ax_mag …
+        # Keep the default axis formatting for ax_mag.
 
         # Bottom plot (row 2 of 2)
         self.ax_speed = self.fig.add_subplot(2, 1, 2)
         self.ax_speed.set_title("Speed Plot")
-        # … any default formatting for ax_speed …
-
-        # Leave a bit more room on the left so y-axis labels don't get clipped
-        # self.fig.subplots_adjust(left=0.12, right=0.98)
+        # Keep the default axis formatting for ax_speed.
 
         # Create the canvas and return it
         self.canvas = FigureCanvas(self.fig)
@@ -180,19 +175,19 @@ class CalibrationFlightWidget(QWidget):
     def createDataWidgets(self):
         box = QGroupBox("Directional Calibration Data")
 
-        # Use a vertical layout on the group box
+        # Use a vertical layout on the group box.
         vbox = QVBoxLayout(box)
 
-        # — Apply button —
+        # Apply button
         apply_btn = QPushButton("Apply")
         apply_btn.clicked.connect(self.applyCalibrationFlightData)
         vbox.addWidget(apply_btn, alignment=Qt.AlignmentFlag.AlignLeft)
-        # — Cancel button —
+        # Cancel button
         cancel_btn = QPushButton("Cancel")
         cancel_btn.clicked.connect(self.cancelCalibrationFlightData)
         vbox.addWidget(cancel_btn, alignment=Qt.AlignmentFlag.AlignLeft)
 
-        # — Grid of inputs —
+        # Grid of calibration inputs
         grid = QGridLayout()
         grid.setColumnStretch(1, 1)  # let the QLineEdits expand
 
@@ -205,46 +200,45 @@ class CalibrationFlightWidget(QWidget):
             QLabel("Main Direction"), 0, 2, alignment=Qt.AlignmentFlag.AlignCenter
         )
 
-        # Row 1 (vertical up/down)
         # Row 1 (vertical up/down) + shared main selector for vertical pair
         self.TD_input = QLineEdit()
         self.main_dir_group = QButtonGroup(box)
         self.main_dir_group.setExclusive(True)
 
         self.cb_vertical_main = QCheckBox()
-        self.cb_vertical_main.setToolTip("Checked: Top → Down is main. Unchecked: Bottom → Up is main.")
+        self.cb_vertical_main.setToolTip("Checked: Top -> Down is main. Unchecked: Bottom -> Up is main.")
         self.main_dir_group.addButton(self.cb_vertical_main)
-        grid.addWidget(QLabel("Top → Down"), 1, 0, alignment=Qt.AlignmentFlag.AlignCenter)
+        grid.addWidget(QLabel("Top -> Down"), 1, 0, alignment=Qt.AlignmentFlag.AlignCenter)
         grid.addWidget(self.TD_input, 1, 1)
         grid.addWidget(self.cb_vertical_main, 1, 2, 2, 1, alignment=Qt.AlignmentFlag.AlignCenter)
 
         # Row 2 (vertical counterpart)
         self.BU_input = QLineEdit()
-        grid.addWidget(QLabel("Bottom → Up"), 2, 0, alignment=Qt.AlignmentFlag.AlignCenter)
+        grid.addWidget(QLabel("Bottom -> Up"), 2, 0, alignment=Qt.AlignmentFlag.AlignCenter)
         grid.addWidget(self.BU_input, 2, 1)
 
         # Row 3 (horizontal left/right) + shared main selector for horizontal pair
         self.LR_input = QLineEdit()
         self.cb_horizontal_main = QCheckBox()
-        self.cb_horizontal_main.setToolTip("Checked: Left → Right is main. Unchecked: Right → Left is main.")
+        self.cb_horizontal_main.setToolTip("Checked: Left -> Right is main. Unchecked: Right -> Left is main.")
         self.main_dir_group.addButton(self.cb_horizontal_main)
-        grid.addWidget(QLabel("Left → Right"), 3, 0, alignment=Qt.AlignmentFlag.AlignCenter)
+        grid.addWidget(QLabel("Left -> Right"), 3, 0, alignment=Qt.AlignmentFlag.AlignCenter)
         grid.addWidget(self.LR_input, 3, 1)
         grid.addWidget(self.cb_horizontal_main, 3, 2, 2, 1, alignment=Qt.AlignmentFlag.AlignCenter)
 
         # Row 4 (horizontal counterpart)
         self.RL_input = QLineEdit()
-        grid.addWidget(QLabel("Right → Left"), 4, 0, alignment=Qt.AlignmentFlag.AlignCenter)
+        grid.addWidget(QLabel("Right -> Left"), 4, 0, alignment=Qt.AlignmentFlag.AlignCenter)
         grid.addWidget(self.RL_input, 4, 1)
 
         vbox.addLayout(grid)
 
-        # Default reference direction: vertical (Top → Down). Only one can be checked.
+        # Default reference direction: vertical (Top -> Down). Only one can be checked.
         self.cb_vertical_main.setChecked(True)
         self.cb_horizontal_main.setChecked(False)
 
         vbox.addStretch()
-        # — Save button —
+        # Save button
         save_btn = QPushButton("Save")
         save_btn.clicked.connect(self.saveCalibrationFlightData)
         vbox.addWidget(save_btn, alignment=Qt.AlignmentFlag.AlignRight)
@@ -327,7 +321,7 @@ class CalibrationFlightWidget(QWidget):
             )
             return
 
-        # 각 방향별 평균 자기장 값을 저장할 딕셔너리 (Top-Down / Bottom-Up / Left-Right / Right-Left)
+        # Store average magnetic values grouped by direction.
         directional_mags = {"TD": [], "BU": [], "LR": [], "RL": []}
         direction_colors = {"TD": [], "BU": [], "LR": [], "RL": []}
 
@@ -336,38 +330,35 @@ class CalibrationFlightWidget(QWidget):
             segment_df = self.df.iloc[start : end + 1]
             color = self._palette[idx % len(self._palette)]
 
-            # mag의 평균값을 구하고 방향을 확인한후 그 값을 TD_input등에 방향에 맞추어 넣는다
+            # Average the selected segment and classify its direction.
             avg_mag = segment_df["Mag"].mean()
 
-            # 방향을 확인 (북을 기준으로 한 각도와 비교)
+            # Compare the segment heading against the chosen reference axis.
             start_x, end_x = segment_df["X"].iloc[0], segment_df["X"].iloc[-1]
             start_y, end_y = segment_df["Y"].iloc[0], segment_df["Y"].iloc[-1]
 
             dx = end_x - start_x
             dy = end_y - start_y
 
-            # heading_deg: 북을 0°, 시계방향 증가 (atan2(dx, dy) 사용)
+            # heading_deg uses north as 0 degrees and increases clockwise.
             heading_deg = (math.degrees(math.atan2(dx, dy)) + 360) % 360
             main_deg = getattr(self, "_main_direction_degree", 0) or 0
             diff = (heading_deg - main_deg + 360) % 360
 
-            # main 방향을 기준으로 4분면으로 분류
+            # Classify the segment into one of the four flight directions.
             if diff <= 45 or diff > 315:
                 direction = "BU"  # along main direction
             elif diff <= 135:
-                direction = "LR"  # 90° clockwise from main
+                direction = "LR"  # 90 degrees clockwise from main
             elif diff <= 225:
                 direction = "TD"  # opposite to main
             else:
-                direction = "RL"  # 270° from main (counter-clockwise)
+                direction = "RL"  # 270 degrees from main (counter-clockwise)
 
             directional_mags[direction].append(avg_mag)
             direction_colors[direction].append(color)
-            logger.debug(
-                f"Line ({start}-{end}) heading {heading_deg:.1f}°, diff {diff:.1f}° -> {direction} with avg mag {avg_mag:.2f}"
-            )
 
-        # 각 방향별로 계산된 평균값들을 다시 평균내어 입력 필드에 설정 + 색상 강조
+        # Apply averaged values to the inputs and highlight the source color.
         self._apply_direction_result("TD", self.TD_input, directional_mags, direction_colors)
         self._apply_direction_result("BU", self.BU_input, directional_mags, direction_colors)
         self._apply_direction_result("LR", self.LR_input, directional_mags, direction_colors)
@@ -378,9 +369,11 @@ class CalibrationFlightWidget(QWidget):
             "Applied",
             "The average magnetic field values have been calculated and applied to the input fields.",
         )
+        logger.info(
+            f"Applied calibration guidance from {len(self._selected_lines)} selected line(s)"
+        )
 
-        # 적용 후 선택 초기화 및 플롯 업데이트
-
+        # Clear the temporary selection and refresh the plots.
         self._sel_positions.clear()
         self.update_plots(self.df)
 
@@ -391,8 +384,8 @@ class CalibrationFlightWidget(QWidget):
                 self, "Project Path Missing", "Open a project folder before saving."
             )
             return
-    
-        # 레퍼런스용 check 박스를 확인하고 그값을 기준으로 차이를 저장
+
+        # Read the directional offset values from the input fields.
         try:
             values = {
                 "TD": float(self.TD_input.text()),
@@ -408,12 +401,12 @@ class CalibrationFlightWidget(QWidget):
 
         # Choose main directions per axis (two selectors)
         if self.cb_vertical_main.isChecked():
-            reference = "TD" 
+            reference = "TD"
         else:
             reference = "LR"
 
         reference_value = values[reference]
-        
+
         # Calculate differences and store them (use axis-specific mains)
         offsets = {
             "offset_TD": reference_value - values["TD"],
@@ -428,14 +421,14 @@ class CalibrationFlightWidget(QWidget):
         QMessageBox.information(
             self,
             "Saved",
-            "Calibration offsets saved.\n"            
+            "Calibration offsets saved.\n"
         )
 
         # --- Save to file ---
         file_path = os.path.join(project_path, "calibration.txt")
         try:
             with open(file_path, "w", encoding="utf-8") as f:
-                # New labels (aligned with UI)
+                # New labels aligned with the UI.
                 f.write(f"TD {offsets['offset_TD']:.2f}\n")
                 f.write(f"BU {offsets['offset_BU']:.2f}\n")
                 f.write(f"LR {offsets['offset_LR']:.2f}\n")
@@ -443,22 +436,21 @@ class CalibrationFlightWidget(QWidget):
 
             logger.info(f"Calibration data saved to {file_path}")
         except IOError as e:
-            logger.error(f"Failed to save calibration file: {e}")
+            logger.exception(f"Failed to save calibration file: {file_path}")
             QMessageBox.critical(
                 self, "File Save Error", f"Could not save calibration file:\n{e}"
             )
 
     def update_plots(self, df):
         if df is None or df.empty:
-            logger.warning("Calibration data is empty. Cannot update plots.")
             self._temp_line = None
             return
 
-        # 임시 라인 초기화 (Axes가 갱신되면 제거할 수 없으므로 참조만 해제)
+        # Reset the temporary line reference before redrawing the axes.
         self._temp_line = None
 
-        # --- Scatter Plot 업데이트 ---
-        # X, Y가 있으면 누적 이동거리(m)를 계산해 x축으로 사용
+        # --- Scatter plot update ---
+        # Use cumulative distance on the x-axis when X and Y are available.
         distance = None
         step_dist = None
         if {"X", "Y"}.issubset(df.columns):
@@ -472,15 +464,12 @@ class CalibrationFlightWidget(QWidget):
         if {"X", "Y", "Mag"}.issubset(df.columns):
             x, y = df["X"], df["Y"]
             self.scatter_ax.scatter(x, y, color="black", s=1, alpha=0.7)
-            # 가로축 범위 확대
+            # Expand the horizontal range for easier interaction.
             x_min, x_max = x.min(), x.max()
             x_margin = x_max - x_min
             self.scatter_ax.set_xlim(x_min - x_margin, x_max + x_margin)
-            # y_min, y_max = y.min(), y.max()
-            # y_margin = y_max - y_min
-            # self.scatter_ax.set_ylim(y_min - y_margin, y_max + y_margin)
 
-            # 오프셋 모드 끄기 → 절대값 그대로 표시
+            # Disable axis offset notation so absolute coordinates stay visible.
             self.scatter_ax.ticklabel_format(useOffset=False, style="plain", axis="x")
             self.scatter_ax.ticklabel_format(useOffset=False, style="plain", axis="y")
 
@@ -494,7 +483,6 @@ class CalibrationFlightWidget(QWidget):
 
         palette = self._palette
         if self._selected_lines:
-
             for i, line in enumerate(self._selected_lines):
                 start, end = line
                 color = palette[i % len(palette)]
@@ -509,8 +497,8 @@ class CalibrationFlightWidget(QWidget):
                 dy = 5
                 self.scatter_ax.annotate(
                     "",
-                    xy=(xs[-1] + dx, ys[-1] + dy),  # arrowhead just before the real end
-                    xytext=(xs[0] + dx, ys[0] + dy),  # tail just after the real start
+                    xy=(xs[-1] + dx, ys[-1] + dy),
+                    xytext=(xs[0] + dx, ys[0] + dy),
                     arrowprops=dict(arrowstyle="->", color=color, lw=1.5),
                     zorder=6,
                 )
@@ -518,7 +506,7 @@ class CalibrationFlightWidget(QWidget):
         self.scatter_fig.tight_layout()
         self.scatter_canvas.draw()
 
-        # --- Line Plot 업데이트 ---
+        # --- Line plot update ---
         self.ax_mag.clear()
         self.ax_speed.clear()
 
@@ -537,7 +525,7 @@ class CalibrationFlightWidget(QWidget):
         # --- Speed Plot ---
         speed_available = False
         if {"X", "Y", "Counter"}.issubset(df.columns):
-            dt = df["Counter"].diff() / 1000.0  # ms to s
+            dt = df["Counter"].diff() / 1000.0
             if step_dist is None:
                 dx = df["X"].diff()
                 dy = df["Y"].diff()
@@ -584,9 +572,9 @@ class CalibrationFlightWidget(QWidget):
         self.canvas.draw()
 
     def _on_scatter_select(self, event):
-        # 오른쪽 클릭: 즉시 취소
+        # Right click cancels the current selection immediately.
         if event.button == 3:
-            # 현재 선택 및 임시 선 제거
+            # Remove the active selection and temporary line.
             self._sel_positions.clear()
             if hasattr(self, "_temp_line") and self._temp_line:
                 try:
@@ -600,7 +588,7 @@ class CalibrationFlightWidget(QWidget):
         if event.inaxes is not self.scatter_ax or self.df.empty:
             return
 
-        # 왼쪽 클릭 싱글: 시작점 마킹
+        # Left click selects the starting point.
         if event.button == 1 and not self._sel_positions:
             if len(self._selected_lines) >= 4:
                 QMessageBox.information(
@@ -638,28 +626,28 @@ class CalibrationFlightWidget(QWidget):
             return
 
     def _on_mouse_move(self, event):
-        """첫 점 선택 후 마우스 이동 시 임시 라인(rubber-band) 그리기"""
+        """Draw a temporary rubber-band line while selecting a segment."""
         if not self._sel_positions or event.inaxes is not self.scatter_ax:
             return
         x0 = self.df["X"].iloc[self._sel_positions[0]]
         y0 = self.df["Y"].iloc[self._sel_positions[0]]
         x1, y1 = event.xdata, event.ydata
-        # 이전 임시 라인 제거
+        # Remove the previous preview line.
         if hasattr(self, "_temp_line") and self._temp_line:
             try:
                 self._temp_line.remove()
             except NotImplementedError:
-                # 이미 축에서 제거된 경우 무시
+                # Ignore the case where the artist has already been removed.
                 pass
             self._temp_line = None
-        # 새로운 임시 라인 그리기
+        # Draw the updated preview line.
         self._temp_line = self.scatter_ax.plot(
             [x0, x1], [y0, y1], "--", color="blue", zorder=4
         )[0]
         self.scatter_ax.figure.canvas.draw_idle()
 
     def _on_scroll_zoom(self, event):
-        """마우스 휠로 스캐터 영역 확대/축소."""
+        """Zoom the scatter plot around the mouse cursor."""
         if event.inaxes is not self.scatter_ax:
             return
         if event.xdata is None or event.ydata is None:
@@ -684,18 +672,18 @@ class CalibrationFlightWidget(QWidget):
         self.scatter_canvas.draw_idle()
 
     def _set_input_color(self, line_edit, color=None):
-        """입력창 배경에 선택된 라인 색상을 반영."""
+        """Apply the selected line color to the input background."""
         if color is None:
             line_edit.setStyleSheet("")
             return
         r, g, b = [int(c * 255) for c in color[:3]]
-        alpha = 64  # 0~255 (약 25% 투명)
+        alpha = 64  # 0-255, roughly 25% opacity
         line_edit.setStyleSheet(
             f"background-color: rgba({r}, {g}, {b}, {alpha});"
         )
 
     def _apply_direction_result(self, direction, line_edit, directional_mags, direction_colors):
-        """평균값을 입력창에 설정하고 선택 라인 색상으로 배경 표시."""
+        """Write the averaged value and reflect the selected line color."""
         if directional_mags[direction]:
             avg = sum(directional_mags[direction]) / len(directional_mags[direction])
             line_edit.setText(f"{avg:.2f}")
@@ -706,7 +694,6 @@ class CalibrationFlightWidget(QWidget):
 
     @Slot(str)
     def on_project_opened(self, project_path: str):
-        logger.debug(f"CalibrationFlightWidget: Project opened at {project_path}")
         self._main_direiion_str = config.get('direction_str', '')
         self._main_direction_degree = config.get("direction", 0)
         self.load_state_from_config()
@@ -740,7 +727,6 @@ class CalibrationFlightWidget(QWidget):
 
     def save_state_to_config(self):
         """Save current calibration widget state to project config."""
-        logger.debug("Saving calibration widget state to config")
         if config.file_path is None:
             return
         # Reload existing config from disk if in-memory store is empty to avoid overwriting other keys.
@@ -749,7 +735,6 @@ class CalibrationFlightWidget(QWidget):
                 config.load()
             except Exception as e:
                 logger.warning(f"Failed to reload config before saving calibration state: {e}")
-        # file_names = [Path(p).name for p in self._selected_files] if getattr(self, "_selected_files", None) else []
         state = {
             "FileList": self._selected_files,
             "TD": self.TD_input.text(),

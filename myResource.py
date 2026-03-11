@@ -66,8 +66,8 @@ def load_SEC_file(file_path: str, out_folder: str = None) -> str | None:
         logger.info(f"SEC file 변환 완료 → {out_file_path}")
         return out_file_path
 
-    except Exception as e:
-        logger.error(f"SEC 파일 변환 실패 ({file_path}): {e}")
+    except Exception:
+        logger.exception(f"SEC 파일 변환 실패 ({file_path})")
         return None
 
 
@@ -95,8 +95,7 @@ def make_project_subfolder(subfolder_name: str) -> Path | None:
 
     try:
         subfolder_path.mkdir(exist_ok=True)
-        logger.debug(f"Subfolder ensured: {subfolder_path}")
         return subfolder_path
-    except Exception as e:
-        logger.error(f"Failed to create subfolder {subfolder_path}: {e}")
+    except Exception:
+        logger.exception(f"Failed to create subfolder {subfolder_path}")
         return None

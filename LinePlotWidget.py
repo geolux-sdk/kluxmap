@@ -12,7 +12,7 @@ from loguru import logger
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 import ppigrf
 
-# 파일 상단에 추가
+# Widget imports
 from PySide6.QtCore import Qt, QSize, Slot
 from PySide6.QtGui import QAction, QIcon
 from PySide6.QtWidgets import (
@@ -39,7 +39,7 @@ from DataManager import DataManager, Source
 
 from myResource import resource_path
 from mySettings import config
-from kriging_dialog import KrigingPlotDialog_withHead
+from kriging_dialog import KrigingPlotDialog
 from myWidgets import DataFilterDialog
 
 from micro_levelling_medain_filter import run_micro_level
@@ -67,39 +67,37 @@ class LinePlotWidget(QWidget):
         self._segment_counter = 0
         self._line_select_start = None
 
-        logger.debug("LinePlotWidget")
         self.initUI()
-        logger.debug("MainWIdget end")
 
     def initUI(self):
         layout = QVBoxLayout()
-        # 페이지 전용 툴바
+        # Page toolbar
         toolbar = QToolBar()
         toolbar.setIconSize(QSize(32, 32))
 
-        self.actionDataConfiDisp = QAction(
+        self.actionDataConfig = QAction(
             QIcon(resource_path("filter.png")), "Filter", self
         )
-        self.actionDataConfiDisp.setStatusTip("Data Filter Settings")
-        self.actionDataConfiDisp.triggered.connect(self.openDataFilterDialog)
+        self.actionDataConfig.setStatusTip("Data filter settings")
+        self.actionDataConfig.triggered.connect(self.openDataFilterDialog)
 
         self.actionPlotKriging = QAction(
-            QIcon(resource_path("griding.png")), "Griding", self
+            QIcon(resource_path("griding.png")), "Gridding", self
         )
         self.actionPlotKriging.triggered.connect(self.openKrigingDialog)
 
-        # Save를 툴바에 추가하고 LinePlotWidget.saveData로 연결
+        # Add the save action to the toolbar.
         self.actionSaveData = QAction(QIcon(resource_path("save.png")), "SAVE", self)
-        self.actionSaveData.setStatusTip("Save Proecessed Data")
+        self.actionSaveData.setStatusTip("Save processed data")
         self.actionSaveData.triggered.connect(self.saveData)
 
-        toolbar.addAction(self.actionDataConfiDisp)
+        toolbar.addAction(self.actionDataConfig)
         toolbar.addAction(self.actionPlotKriging)
         toolbar.addAction(self.actionSaveData)
 
         layout.addWidget(toolbar)
 
-        # 메인 레이아웃 설정
+        # Main layout
         vbox_layout = QVBoxLayout()
         vbox_layout.addWidget(
             self.createFileList(), alignment=Qt.AlignmentFlag.AlignLeft
@@ -112,7 +110,7 @@ class LinePlotWidget(QWidget):
         table_widget = self.createTableWidget()
         data_layout.addWidget(table_widget, 1)
 
-        # 스캐터 플롯과 컨트롤(체크박스)을 담을 컨테이너 위젯 생성
+        # Container for the scatter plot and its controls
         scatter_container = QWidget()
         scatter_container.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
@@ -120,7 +118,7 @@ class LinePlotWidget(QWidget):
         scatter_vbox = QVBoxLayout(scatter_container)
         scatter_vbox.setContentsMargins(0, 0, 0, 0)
 
-        # "COLORBAR" 체크박스를 생성하고 레이아웃의 오른쪽에 추가
+        # Add the colorbar toggle above the scatter plot
         self.scatter_colorbar_cb = QCheckBox("COLOR BAR")
         self.scatter_colorbar_cb.stateChanged.connect(self.update_scatterplot)
         scatter_vbox.addWidget(
@@ -128,15 +126,15 @@ class LinePlotWidget(QWidget):
         )
         scatter_vbox.addWidget(
             self.createScatterPlot()
-        )  # 체크박스 아래에 스캐터 플롯 추가
+        )  # Place the scatter plot below the checkbox
 
         data_layout.addWidget(scatter_container, 12)
-        # 테이블:스캐터 가로 비율을 1:1.2로 조정
+        # Make the scatter panel slightly wider than the table
         data_layout.setStretch(0, 10)
         data_layout.setStretch(1, 12)
 
         dataV_layout = QVBoxLayout()
-        # 상단(테이블+스캐터):하단 그래프 비율을 2:1로 조정해 하단 높이를 2/3 수준으로 축소
+        # Keep the lower plot shorter than the upper data area
         dataV_layout.addLayout(data_layout, 2)
         dataV_layout.addWidget(self.createCanvasPlot(), 1)
 
@@ -156,12 +154,12 @@ class LinePlotWidget(QWidget):
         layout.addLayout(main_layout)
         self.setLayout(layout)
 
-        self.actionDataConfiDisp.setEnabled(False)
+        self.actionDataConfig.setEnabled(False)
         self.actionPlotKriging.setEnabled(False)
         self.actionSaveData.setEnabled(False)
 
     def actionEnable(self, action=True):
-        self.actionDataConfiDisp.setEnabled(action)
+        self.actionDataConfig.setEnabled(action)
         self.actionPlotKriging.setEnabled(action)
         self.actionSaveData.setEnabled(action)
 
@@ -169,7 +167,7 @@ class LinePlotWidget(QWidget):
         DataFilterDialog(self).exec()
 
     def createScatterPlot(self):
-        # scatter plot을 더 크게 보기 위해 figsize 및 최소 높이를 확장
+        # Increase the default scatter plot size for dense scanline data
         self.scatter_fig, self.scatter_ax = plt.subplots(figsize=(8, 4), dpi=100)
         self.scatter_ax.set_title("Mag Value (Sensor_Total)")
         self.scatter_ax.set_xlabel("Index")
@@ -193,8 +191,7 @@ class LinePlotWidget(QWidget):
         return self.canvas
 
     def createFileList(self):
-        logger.debug("createFileList")
-        """파일 목록을 보여주는 리스트 위젯을 생성하는 메서드"""
+        """Create the list widget that shows scanline files."""
         self.fileListWidget = QListWidget()
         self.fileListWidget.setSelectionMode(
             QAbstractItemView.SelectionMode.SingleSelection
@@ -210,7 +207,7 @@ class LinePlotWidget(QWidget):
     def createTableWidget(self):
         self.tableWidget = QTableWidget()
         self.tableWidget.setSelectionBehavior(
-            QAbstractItemView.SelectionBehavior.SelectColumns  # 행 단위 선택에서 열 단위 선택으로 변경
+            QAbstractItemView.SelectionBehavior.SelectColumns  # Select whole columns
         )
         self.tableWidget.setSelectionMode(
             QAbstractItemView.SelectionMode.SingleSelection
@@ -232,31 +229,28 @@ class LinePlotWidget(QWidget):
 
         return self.tableWidget
 
-    def on_header_right_click(self, pos):  # pos: QPoint (헤더 기준 좌표)
+    def on_header_right_click(self, pos):  # pos: QPoint in header coordinates
         header = self.tableWidget.horizontalHeader()
         logical_index = header.logicalIndexAt(pos)
         if logical_index < 0:
             return
 
-        logger.debug(f"Header RIGHT click: {logical_index}")
         if logical_index not in self.plot_list:
             self.plot_list.append(logical_index)
         else:
             if len(self.plot_list) > 1:
                 self.plot_list.remove(logical_index)
-        logger.debug(f"on_header_clicked {logical_index} {self.plot_list}")
         self.plot_column_by_index(self.plot_list)
 
     def calculate_directional_avg_from_df(self):
-        logger.debug("calculate_directional_avg_from_df")
         """
-        로드된 DataFrame 딕셔너리에서 방향별 평균 계산
+        Calculate average magnetic offsets by scanline direction.
 
         Parameters:
-            scanline_df (dict[str, pd.DataFrame]): key=이름, value=DataFrame
+            scanline_df (dict[str, pd.DataFrame]): key=name, value=DataFrame
 
         Returns:
-            dict: offset_TD/BU/LR/RL 값을 담은 딕셔너리
+            dict: directional offsets for TD/BU/LR/RL
         """
 
         cali = config.get(
@@ -272,11 +266,11 @@ class LinePlotWidget(QWidget):
 
         if not self.scanline_df:
             logger.warning("No scanline data to calculate calibration.")
-            # 안전 기본값으로 저장 후 리턴
+            # Save the default configuration and exit safely.
             config.set_subvalue("filters_line", "cali_filter", cali)
             return None, None, None
 
-        # 평균 Mag을 방향별(TD/BU/LR/RL)로 계산
+        # Average Mag values by direction (TD/BU/LR/RL).
         sums = {"TD": 0.0, "BU": 0.0, "LR": 0.0, "RL": 0.0}
         counts = {"TD": 0, "BU": 0, "LR": 0, "RL": 0}
 
@@ -304,8 +298,6 @@ class LinePlotWidget(QWidget):
             diff_v = td_avg - bu_avg
             offsets["offset_TD"] = -diff_v / 2.0
             offsets["offset_BU"] = diff_v / 2.0
-        else:
-            logger.debug("Vertical calibration skipped (not enough TD/BU data)")
 
         if counts["LR"] > 0 and counts["RL"] > 0:
             lr_avg = sums["LR"] / counts["LR"]
@@ -313,17 +305,20 @@ class LinePlotWidget(QWidget):
             diff_h = lr_avg - rl_avg
             offsets["offset_LR"] = -diff_h / 2.0
             offsets["offset_RL"] = diff_h / 2.0
-        else:
-            logger.debug("Horizontal calibration skipped (not enough LR/RL data)")
 
         cali.update(offsets)
         config.set_subvalue("filters_line", "cali_filter", cali)
-        logger.debug(f"save calibration data {self.calibration_data}")
+        logger.info(
+            "Calculated scanline calibration offsets: "
+            f"TD={offsets['offset_TD']:.3f}, "
+            f"BU={offsets['offset_BU']:.3f}, "
+            f"LR={offsets['offset_LR']:.3f}, "
+            f"RL={offsets['offset_RL']:.3f}"
+        )
         return offsets
 
     def updateFileList(self, file_paths):
-        logger.debug("updateFileList")
-        """선택된 폴더의 파일 목록을 리스트 위젯에 업데이트"""
+        """Refresh the list widget with selected scanline files."""
         self.fileListWidget.clear()
         self.scanline_df.clear()
         self.scanline_filepaths.clear()
@@ -334,16 +329,20 @@ class LinePlotWidget(QWidget):
             ]
 
             for file_path in sorted(filtered_paths):
-                base = os.path.basename(file_path)  # 파일명만 추출
-                name_wo_ext = os.path.splitext(base)[0]  # 확장자 제거
+                base = os.path.basename(file_path)  # Extract the filename only.
+                name_wo_ext = os.path.splitext(base)[0]  # Remove the extension.
                 item = QListWidgetItem(name_wo_ext)
                 self.fileListWidget.addItem(item)
-                logger.debug(f"list update {file_path}")
                 df = pd.read_csv(file_path)
                 self.scanline_df[name_wo_ext] = df
                 self.scanline_filepaths[name_wo_ext] = file_path
 
-        # 첫 번째 항목 자동 선택 및 로드
+        if self.scanline_df:
+            logger.info(
+                f"Loaded {len(self.scanline_df)} scanline file(s) into the line plot"
+            )
+
+        # Automatically select and load the first item.
         if self.fileListWidget.count() > 0:
             first_item = self.fileListWidget.item(0)
             first_item.setSelected(True)
@@ -353,7 +352,6 @@ class LinePlotWidget(QWidget):
             self.first_item = first_item
 
     def update_scatterplot(self):
-        logger.debug("update_scatterplot")
         self._reset_scatter_axes()
 
         if not self.scanline_df:
@@ -392,7 +390,7 @@ class LinePlotWidget(QWidget):
             "Mag_Level",
         ]
 
-        # df의 마지막 컬럼명이 허용 목록에 없으면 기본값 "Mag" 사용
+        # Fall back to "Mag" if the last dataframe column is not in the allowed list.
         if not self.selected_df.empty:
             last_col = self.selected_df.columns[-1]
             val_col = last_col if last_col in allowed_cols else "Mag"
@@ -453,7 +451,7 @@ class LinePlotWidget(QWidget):
             )
 
     def _format_scatter_axes(self, val_col: str):
-        """공통 축 포맷/레이블 설정."""
+        """Apply common scatter-axis formatting."""
         self.scatter_ax.ticklabel_format(useOffset=False, style="plain", axis="x")
         self.scatter_ax.ticklabel_format(useOffset=False, style="plain", axis="y")
         self.scatter_ax.set_title(f"{val_col}")
@@ -498,11 +496,9 @@ class LinePlotWidget(QWidget):
                 self.tableWidget.setItem(i, j, item)
 
     def on_table_cell_clicked(self, row, column_index):
-        logger.debug(f"on_table_cell_clicked {row} {column_index}")
         self.on_header_clicked(column_index)
 
     def on_header_clicked(self, column_index):
-        logger.debug(f"on_header_clicked {column_index}")
         self.plot_list = [column_index]
         self.plot_column_by_index(self.plot_list)
         self.selected_col_name = self.tableWidget.horizontalHeaderItem(
@@ -530,7 +526,6 @@ class LinePlotWidget(QWidget):
                 label=str(col_name),
             )
         self.ax.legend(loc="best", fontsize=8, frameon=True)
-        # self.ax.set_title(f"Plot of '{col_name}'")
         self.ax.set_xlabel("Index")
         self.ax.set_ylabel(col_name)
         self.ax.grid(True)
@@ -577,7 +572,7 @@ class LinePlotWidget(QWidget):
                 meta={"source": self._active_scanline_name},
             )
         except Exception as e:
-            logger.error(f"Failed to create segment: {e}")
+            logger.exception("Failed to create line plot segment")
             return
         self.set_segment(segment_id)
 
@@ -744,10 +739,26 @@ class LinePlotWidget(QWidget):
         if not current_item and self.fileListWidget.count() > 0:
             current_item = self.fileListWidget.item(0)
         if not current_item:
-            logger.warning("Filtering called, but no items to process.")
+            logger.info("Line filtering skipped because no scanline data is loaded.")
             return
 
-        logger.debug(f"LinePlotWidget filtering {settings}")
+        enabled_filters = []
+        if settings.get("Diurnal_Correction", {}).get("enabled", False):
+            enabled_filters.append("diurnal")
+        if settings.get("igrf_correction", {}).get("enabled", False):
+            enabled_filters.append("igrf")
+        if settings.get("median_filter", {}).get("enabled", False):
+            enabled_filters.append("median")
+        if settings.get("lowpass_filter", {}).get("enabled", False):
+            enabled_filters.append("lowpass")
+        if settings.get("cali_filter", {}).get("enabled", False):
+            enabled_filters.append("calibration")
+        if settings.get("micro_levelling", {}).get("enabled", False):
+            enabled_filters.append("micro")
+        logger.info(
+            f"Applying line filters to {len(self.scanline_df)} scanline(s): "
+            f"{', '.join(enabled_filters) if enabled_filters else 'none'}"
+        )
         diurnal_df = self._load_diurnal_df(settings)
 
         for key, df in self.scanline_df.items():
@@ -771,9 +782,12 @@ class LinePlotWidget(QWidget):
             col_name = "Mag"
         else:
             col_name = last_col
-        logger.debug(f"Final filtered column for plotting: {col_name}")
         filtered_mag = self._apply_micro_levelling(self.scanline_df, settings, col_name)
-            
+
+        logger.info(
+            f"Line filtering complete for {len(self.scanline_df)} scanline(s); "
+            f"active plot column={col_name}"
+        )
         self.on_item_clicked(current_item)
         return
 
@@ -784,20 +798,23 @@ class LinePlotWidget(QWidget):
             return pd.DataFrame()
 
         csv_files = diurnal_cfg.get("files", [])
+        if not csv_files:
+            logger.warning("Diurnal correction is enabled but no diurnal files are selected.")
+            return pd.DataFrame()
         df_list = []
         for csv_file in csv_files:
             try:
                 df = pd.read_csv(csv_file)
                 df_list.append(df)
-                logger.debug(f"Loaded {csv_file}")
             except Exception as e:
-                logger.error(f"Error loading {csv_file}: {e}")
+                logger.error(f"Failed to load diurnal file '{csv_file}': {e}")
         if not df_list:
+            logger.warning("No valid diurnal files could be loaded.")
             QMessageBox.warning(
                 self,
                 "Diurnal Data Error",
-                f"An error occurred while processing diurnal data:\n{e}\n\n"
-                "Mag values were zeroed so filtering can continue.",
+                "No valid diurnal files could be loaded.\n\n"
+                "Diurnal correction was skipped.",
             )
             return pd.DataFrame()
 
@@ -811,18 +828,21 @@ class LinePlotWidget(QWidget):
                 diurnal_df = diurnal_df.loc[~drop_mask].copy()
                 logger.warning(f"Removed {removed} diurnal rows with Mag=99999.00")
             if diurnal_df.empty:
-                logger.warning("All diurnal rows were filtered out; returning empty DataFrame.")
+                logger.warning("All diurnal rows were filtered out; diurnal correction was skipped.")
                 QMessageBox.warning(
                     self,
                     "Diurnal Data Error",
-                    f"An error occurred while processing diurnal data:\n{e}\n\n"
-                    "Mag values were zeroed so filtering can continue.",
+                    "All diurnal rows were filtered out.\n\n"
+                    "Diurnal correction was skipped.",
                 )
                 return pd.DataFrame()
 
             mag_mean = diurnal_df["Mag"].mean()
             diurnal_df["Mag"] = diurnal_df["Mag"] - mag_mean
-            logger.debug(f"Diurnal mean={mag_mean:.3f} subtracted from Mag column")
+            logger.info(
+                f"Loaded diurnal reference data: files={len(df_list)}, rows={len(diurnal_df)}, "
+                f"mean_offset={mag_mean:.3f}"
+            )
 
             # Check overlapping timestamps across merged files (Date + Time)
             if {"Date", "Time"}.issubset(diurnal_df.columns):
@@ -837,7 +857,7 @@ class LinePlotWidget(QWidget):
                         f"Diurnal data contains {dup_count} overlapping timestamps"
                     )
         except Exception as e:
-            logger.error(f"Mean subtraction failed for diurnal data: {e}")
+            logger.exception("Failed to prepare diurnal reference data")
             # If any error occurs, zero out Mag values to allow downstream processing.
             QMessageBox.warning(
                 self,
@@ -866,7 +886,6 @@ class LinePlotWidget(QWidget):
         if not diurnal_cfg.get("enabled", False) or not isinstance(diurnal_df, pd.DataFrame) or diurnal_df.empty:
             return filtered_mag
         try:
-            # reference_value = diurnal_df["Mag"][0].astype(float)
             merged = pd.merge(
                 df,
                 diurnal_df[["Date", "Time", "Mag"]],
@@ -883,7 +902,7 @@ class LinePlotWidget(QWidget):
             df["Mag_diurnal"] = merged["Mag_corrected"]
             return df["Mag_diurnal"]
         except Exception as err:
-            logger.error(f"Diurnal correction failed for {key}: {err}")
+            logger.exception(f"Diurnal correction failed for scanline '{key}'")
             QMessageBox.warning(
                 self,
                 "Filter Error",
@@ -893,9 +912,9 @@ class LinePlotWidget(QWidget):
 
     def _apply_igrf(self, df, filtered_mag, settings, key):
         """
-        IGRF 보정: 좌표와 시각을 이용해 모델 자기장을 계산하고 관측값에서 뺀다.
-        - df["IGRF"] : 계산된 모델 총자기장 (nT)
-        - df["Mag_igrf"] : filtered_mag - IGRF (TMA와 동일 개념)
+        Apply IGRF correction using the available coordinates and timestamps.
+        - df["IGRF"] stores the modeled total field in nT.
+        - df["Mag_igrf"] stores filtered_mag - IGRF.
         """
         igrf_cfg = settings.get("igrf_correction", {})
         if not igrf_cfg.get("enabled", False):
@@ -912,7 +931,7 @@ class LinePlotWidget(QWidget):
             flight_altitude_m = float(igrf_cfg.get("flight_altitude", 0) or 0)
 
             if flight_altitude_m != 0:
-                # Use user-specified constant altitude for all samples
+                # Use a constant user-specified altitude for all samples.
                 alt_km = np.full(len(lats), flight_altitude_m / 1000.0, dtype=float)
             elif "Altitude" in df.columns:
                 alt_km = (
@@ -927,7 +946,7 @@ class LinePlotWidget(QWidget):
                 logger.warning(f"{key}: IGRF skipped (no valid lat/lon)")
                 return filtered_mag
 
-            # 시각: Date+Time 조합이 있으면 사용, 없으면 첫 행 날짜/현재 시각 사용
+            # Use Date+Time when available; otherwise fall back to Date or the current UTC time.
             if {"Date", "Time"}.issubset(df.columns):
                 timestamps = pd.to_datetime(
                     df["Date"].astype(str) + " " + df["Time"].astype(str),
@@ -940,7 +959,8 @@ class LinePlotWidget(QWidget):
 
             igrf_vals = np.full(len(df), np.nan, dtype=float)
 
-            # 샘플별 실제 시각을 반영해 한 번에 계산한 뒤, 각 행-시각 쌍의 대각선 성분만 사용한다.
+            # Compute IGRF values in one batch and keep the diagonal entries
+            # so each row uses its own timestamp.
             valid_idx = ~timestamps.isna()
             if not valid_idx.any():
                 logger.warning(f"{key}: IGRF skipped (no valid timestamps)")
@@ -950,7 +970,10 @@ class LinePlotWidget(QWidget):
             valid_lons = lons[mask]
             valid_lats = lats[mask]
             valid_alt_km = alt_km[mask]
-            valid_datetimes = timestamps[mask].dt.to_pydatetime()
+            valid_datetimes = np.array(
+                [ts.to_pydatetime() for ts in timestamps[mask]],
+                dtype=object,
+            )
 
             Be, Bn, Bu = ppigrf.igrf(
                 valid_lons,
@@ -971,19 +994,9 @@ class LinePlotWidget(QWidget):
 
             df["IGRF"] = igrf_vals
             df["Mag_igrf"] = filtered_mag.values - df["IGRF"].values
-            logger.debug(f"{key}: applied IGRF correction (n={len(df)})")
-
-            sample_mask = valid_idx & coord_valid & ~np.isnan(igrf_vals)
-            if sample_mask.any():
-                idx = int(np.flatnonzero(sample_mask)[0])
-                ts = timestamps.iloc[idx]
-                logger.debug(
-                    f"{key}: sample IGRF lat={lats[idx]:.5f}, lon={lons[idx]:.5f}, "
-                    f"alt_km={alt_km[idx]:.3f}, date={ts.date()}, IGRF={igrf_vals[idx]:.2f} nT"
-                )
             return df["Mag_igrf"]
         except Exception as err:
-            logger.error(f"IGRF correction failed for {key}: {err}")
+            logger.exception(f"IGRF correction failed for scanline '{key}'")
             QMessageBox.warning(
                 self,
                 "Filter Error",
@@ -1000,10 +1013,9 @@ class LinePlotWidget(QWidget):
             df["Mag_median"] = filtered_mag.rolling(
                 window=ksize, center=True, min_periods=1
             ).median()
-            logger.debug(f"{key}: applied Median (ksize={ksize})")
             return df["Mag_median"]
         except Exception as err:
-            logger.error(f"Median filter failed for {key}: {err}")
+            logger.exception(f"Median filter failed for scanline '{key}'")
             QMessageBox.warning(
                 self,
                 "Filter Error",
@@ -1013,46 +1025,49 @@ class LinePlotWidget(QWidget):
 
     def _apply_micro_levelling(self, scanline_df, settings, col_name):
         """
-        Placeholder for micro levelling pipeline.
+        Placeholder for the micro-levelling pipeline.
 
         Expected to:
         - use short/long filters (or window lengths) from config
         - optionally apply 2D median smoothing with search radius / neighbor count
         - write output to df['Mag_micro'] and return that series
 
-        Currently just mirrors the input so downstream filters remain unchanged.
+        Currently this keeps the existing dataframe order and updates matching keys.
         """
         micro_cfg = settings.get("micro_levelling", {})
         if not micro_cfg.get("enabled", False):
-            return 
+            return
         try:
             short_len = micro_cfg.get("short_filter_size", micro_cfg.get("window_size", 5))
             long_len = micro_cfg.get("long_filter_size", micro_cfg.get("poly_order", 2))
             search_radius = micro_cfg.get("search_radius", 5.0)
             min_neighbors = micro_cfg.get("min_neighbor_count", 5)
 
-            logger.debug(
-                f"micro levelling (placeholder) short={short_len}, long={long_len}, "
-                f"radius={search_radius}, min_neighbors={min_neighbors}"
+            filtered = run_micro_level(
+                scanline_df,
+                short_len,
+                long_len,
+                search_radius,
+                min_neighbors,
+                col_name,
             )
-            filtered = run_micro_level(scanline_df, short_len, long_len, search_radius, min_neighbors, col_name)
-            # 기존 순서는 유지하고, 새로운 키만 뒤에 추가
+            # Preserve the current order and append only new keys at the end.
             for k, v in filtered.items():
                 if k in self.scanline_df:
-                    self.scanline_df[k] = v  # 위치 유지, 값만 갱신
+                    self.scanline_df[k] = v  # Keep the current position and update values only.
                 else:
-                    self.scanline_df[k] = v  # 새 항목은 맨 뒤에 추가
-            return 
-            
+                    self.scanline_df[k] = v  # Append new items to the end.
+            return
+
         except Exception as err:
-            logger.error(f"Micro levelling failed for  {err}")
+            logger.exception("Micro levelling failed")
             QMessageBox.warning(
                 self,
                 "Filter Error",
                 f"Micro levelling failed for scanline \n{err}",
             )
         return
-    
+
     def _apply_lowpass(self, df, filtered_mag, settings, key):
         low_cfg = settings.get("lowpass_filter", {})
         if not low_cfg.get("enabled", False):
@@ -1061,10 +1076,9 @@ class LinePlotWidget(QWidget):
             cutoff = low_cfg.get("cutoff_freq", 0.1)
             b, a = self._butter_coeffs(cutoff, 1, order=4, btype="low")
             df["Mag_lowpass"] = filtfilt(b, a, filtered_mag.values)
-            logger.debug(f"{key}: applied Low-pass (cutoff={cutoff} Hz)")
             return df["Mag_lowpass"]
         except Exception as err:
-            logger.error(f"Low-pass filter failed for {key}: {err}")
+            logger.exception(f"Low-pass filter failed for scanline '{key}'")
             QMessageBox.warning(
                 self,
                 "Filter Error",
@@ -1094,7 +1108,6 @@ class LinePlotWidget(QWidget):
         offset = cal_cfg.get(offset_key, 0.0)
 
         df["Mag_calibrated"] = filtered_mag + offset
-        logger.debug(f"{key}: applied Calibration (dir={direction}, offset={offset:.2f})")
         return df["Mag_calibrated"]
 
     # --- Minimal self-test helpers (manual) -------------------------------
@@ -1129,12 +1142,13 @@ class LinePlotWidget(QWidget):
     def openKrigingDialog(self):
         column_index = self.tableWidget.currentColumn()
         col_name = self.selected_df.columns[column_index]
-        dlg = KrigingPlotDialog_withHead(
-            self.main_window,
+        parent_window = self.main_window or self.window()
+        dlg = KrigingPlotDialog(
+            parent_window,
             self.scanline_df,
             col_name,
         )
-        dlg.setParent(self.main_window)
+        dlg.setParent(parent_window)
         dlg.setWindowFlags(Qt.WindowType.Window | Qt.WindowType.WindowStaysOnTopHint)
         dlg.show()
         self._open_kriging_dialogs = getattr(self, "_open_kriging_dialogs", [])
@@ -1142,37 +1156,38 @@ class LinePlotWidget(QWidget):
 
     def saveData(self):
         """
-        처리된 스캔라인 데이터를 저장합니다.
-        1. 각 스캔라인을 개별 CSV 파일로 덮어씁니다.
-        2. 모든 스캔라인을 병합하여 하나의 CSV 파일로 저장합니다.
+        Save the processed scanline data.
+        1. Save each scanline back to its original CSV file.
+        2. Save one merged CSV file that combines all scanlines.
         """
         if not self.scanline_df:
             QMessageBox.warning(self, "No Data", "There is no data to save.")
             return
 
-        # 1. 각 스캔라인을 개별 파일로 저장
+        # 1. Save each scanline to its original file.
         for key, df in self.scanline_df.items():
             try:
                 df.to_csv(self.scanline_filepaths[key], index=False)
-                logger.debug(f"Saved individual file: {self.scanline_filepaths[key]}")
             except Exception as e:
-                logger.error(f"Failed to save individual file for {key}: {e}")
+                logger.exception(
+                    f"Failed to save individual scanline file: {self.scanline_filepaths[key]}"
+                )
                 QMessageBox.critical(
                     self,
                     "Save Error",
                     f"Could not save file for scanline '{key}':\n{e}",
                 )
-                return  # 개별 파일 저장 실패 시 중단
+                return  # Stop if saving an individual file fails.
 
-        # 2. 모든 스캔라인을 하나의 파일로 병합하여 저장
+        # 2. Merge all scanlines and save the combined file.
         try:
-            # 모든 데이터프레임 병합
+            # Merge every dataframe in the current scanline set.
             all_dfs = list(self.scanline_df.values())
             # keep column order aligned with the first dataframe
             combined_df = pd.concat(all_dfs, ignore_index=True, sort=False)
             combined_df = combined_df.reindex(columns=all_dfs[0].columns)
 
-            # 저장 경로 결정
+            # Determine the output path.
             if not self.scanline_filepaths:
                 logger.error(
                     "Cannot determine save path as scanline_filepaths is empty."
@@ -1187,10 +1202,10 @@ class LinePlotWidget(QWidget):
             first_path = next(iter(self.scanline_filepaths.values()))
             results_dir = os.path.dirname(first_path)
 
-            # 병합 파일 저장 위치: .processed 폴더 안
+            # Save the merged file in the same results folder.
             output_path = os.path.join(results_dir, "combined_processed_scanlines.csv")
 
-            # 병합된 데이터프레임 저장
+            # Write the merged dataframe to disk.
             combined_df.to_csv(output_path, index=False)
             logger.info(f"Saved combined file to: {output_path}")
 
@@ -1201,7 +1216,7 @@ class LinePlotWidget(QWidget):
             )
 
         except Exception as e:
-            logger.error(f"Failed to save combined file: {e}")
+            logger.exception("Failed to save combined scanline file")
             QMessageBox.critical(
                 self,
                 "Save Error",
@@ -1217,7 +1232,6 @@ class LinePlotWidget(QWidget):
         return files
 
     def initialize(self):
-        logger.debug("initialize")
         proj_path = config.get("project_path", "")
         outfolder_path = os.path.join(proj_path, "results")
         if not os.path.exists(outfolder_path):
@@ -1237,28 +1251,30 @@ class LinePlotWidget(QWidget):
                 QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
                 if os.path.exists(outfolder_path):
                     shutil.rmtree(outfolder_path)
-                    logger.debug(
-                        f"Removed existing scanlines directory: {outfolder_path}"
-                    )
 
-                # ScanLineFiles = self.db.save_all_continuous_record_groups(
-                #     outfolder_path, "1Hz"
-                # )
                 ScanLineFiles = self.db.merge_and_save_scanlines_by_direction(
                     outfolder_path
                 )
                 self.updateFileList(ScanLineFiles)
+                logger.info(
+                    f"Generated {len(ScanLineFiles)} scanline file(s) in {outfolder_path}"
+                )
                 QApplication.restoreOverrideCursor()
             else:
                 self.updateFileList(existing_files)
+                logger.info(
+                    f"Loaded {len(existing_files)} existing scanline file(s) from {outfolder_path}"
+                )
             return
         else:
             QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
-            # ScanLineFiles = self.db.save_all_continuous_record_groups(outfolder_path, "1Hz")
             ScanLineFiles = self.db.merge_and_save_scanlines_by_direction(
                 outfolder_path
             )
             self.updateFileList(ScanLineFiles)
+            logger.info(
+                f"Generated {len(ScanLineFiles)} scanline file(s) in {outfolder_path}"
+            )
             QApplication.restoreOverrideCursor()
 
     def delete_all_items(self):

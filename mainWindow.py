@@ -50,7 +50,7 @@ class KLuxMap(QMainWindow):
         super().__init__()
         self.title = title
         self.settings = QSettings("Geolux", "KLuxMap")
-        logger.info("Progrma Start")
+        logger.info("Program start")
         self.db = DataManager()
         self.initUI()
         self._restore_window()
@@ -67,25 +67,22 @@ class KLuxMap(QMainWindow):
 
         self.tabs = QTabWidget(self)
 
-        self.CalibPlotWidget = CalibrationFlightWidget(self.db)
-        self.LinePlotWidget = LinePlotWidget(self.db)
-        self.FligtPlotWidget = FlightPlotWidget(self.db)
-        logger.debug("Widgets created")
-        self.tabs.addTab(self.CalibPlotWidget, "Calibration Flight")
-        self.tabs.addTab(self.FligtPlotWidget, "DRONE DATA")
-        self.tabs.addTab(self.LinePlotWidget, "SCAN LINE DATA")
+        self.calibrationFlightWidget = CalibrationFlightWidget(self.db)
+        self.linePlotWidget = LinePlotWidget(self.db, self)
+        self.flightPlotWidget = FlightPlotWidget(self.db, self)
+        self.tabs.addTab(self.calibrationFlightWidget, "Calibration Flight")
+        self.tabs.addTab(self.flightPlotWidget, "DRONE DATA")
+        self.tabs.addTab(self.linePlotWidget, "SCAN LINE DATA")
         self.tabs.setCurrentIndex(1)
         self._previous_tab_index = self.tabs.currentIndex()
 
         self.setCentralWidget(self.tabs)
 
         self.connectSignals()
-        logger.debug("UI initialized")
 
     def on_tab_changed(self, index):
-        logger.debug(f"on_tab_changed {index} from {self._previous_tab_index}")
         if index == 2:
-            self.LinePlotWidget.initialize()
+            self.linePlotWidget.initialize()
 
         self._previous_tab_index = index
 
@@ -100,7 +97,7 @@ class KLuxMap(QMainWindow):
 
         if user_response == QMessageBox.Yes:
             try:
-                self.CalibPlotWidget.save_state_to_config()
+                self.calibrationFlightWidget.save_state_to_config()
             except Exception as e:
                 logger.warning(f"Failed to save calibration widget state on exit: {e}")
             self._save_window()
@@ -198,7 +195,11 @@ class KLuxMap(QMainWindow):
         self.settings_action.triggered.connect(self.showProjectSettingsDialog)
         self.about_action.triggered.connect(self.showAboutDialog)
 
-        for w in (self.FligtPlotWidget, self.CalibPlotWidget, self.LinePlotWidget):
+        for w in (
+            self.flightPlotWidget,
+            self.calibrationFlightWidget,
+            self.linePlotWidget,
+        ):
             self.projectOpened.connect(w.on_project_opened)
             self.projectReset.connect(w.on_project_reset)
 
@@ -348,9 +349,9 @@ class KLuxMap(QMainWindow):
         self.import_SEC_files_action.setEnabled(action)
         self.config_action.setEnabled(action)
 
-        self.FligtPlotWidget.actionEnable(action)
-        self.LinePlotWidget.actionEnable(action)
-        self.CalibPlotWidget.actionEnable(action)
+        self.flightPlotWidget.actionEnable(action)
+        self.linePlotWidget.actionEnable(action)
+        self.calibrationFlightWidget.actionEnable(action)
         can_open = not action
         self.createProject_action.setEnabled(can_open)
         self.openProject_action.setEnabled(can_open)
@@ -360,12 +361,13 @@ class KLuxMap(QMainWindow):
             self.recentProject_action.setEnabled(False)
 
     def closeProjectFolder(self):
-        logger.debug("Event : closeProjectFolder")
+        project_path = config.get("project_path", "")
+        if project_path:
+            logger.info(f"Project closed: {project_path}")
         self.menu_action_enable(False)
         self.projectReset.emit()
 
     def createProjectFolder(self):
-        logger.debug("Event : createProjectFolder")
         dlg = CreateProjectDialog(parent=self)
         if not dlg.exec():
             return
@@ -393,9 +395,9 @@ class KLuxMap(QMainWindow):
         self.projectOpened.emit(folder_path)
         self.settings.setValue("projects/last", str(folder_path))
         self._update_recent_project_action()
+        logger.info(f"Project created: {folder_path}")
 
     def openProjectFolder(self):
-        logger.debug("Event : openProjectFolder")
         last_folder = self.settings.value("projects/last", "", type=str)
         default_path = Path(last_folder) if last_folder else Path.home()
         if not default_path.exists():
@@ -404,11 +406,9 @@ class KLuxMap(QMainWindow):
             self, "Select Folder", str(default_path)
         )
         if folder_path:
-            logger.debug(f"openProjectFolder {folder_path}")
             self._open_project(folder_path)
 
     def openRecentProject(self):
-        logger.debug("Event : openRecentProject")
         last_folder = self.settings.value("projects/last", "", type=str)
         if not last_folder:
             QMessageBox.information(
@@ -429,7 +429,6 @@ class KLuxMap(QMainWindow):
             self._update_recent_project_action()
             return
 
-        logger.debug(f"openRecentProject {last_path}")
         self._open_project(last_path)
 
     def _open_project(self, folder_path: str | Path):
@@ -446,13 +445,11 @@ class KLuxMap(QMainWindow):
         self.projectOpened.emit(str(folder_path))
         self.settings.setValue("projects/last", str(folder_path))
         self._update_recent_project_action()
+        logger.info(f"Project opened: {folder_path}")
 
     def resetProjectFolder(self):
-        logger.debug("Event : resetProjectFolder")
-
         project_path = Path(config.get("project_path", ""))
         if not project_path or not project_path.exists():
-            logger.debug("No project path found")
             return
 
         reply = QMessageBox.warning(
@@ -469,7 +466,6 @@ class KLuxMap(QMainWindow):
         if reply == QMessageBox.Yes:
             try:
                 for item in project_path.iterdir():
-                    logger.debug(f"Deleting item: {item}")
                     if item.is_file() or item.is_symlink():
                         item.unlink()
                     elif item.is_dir():
@@ -490,25 +486,22 @@ class KLuxMap(QMainWindow):
                 self.projectReset.emit()
 
             except Exception as e:
-                logger.error(f"Failed to reset project folder: {e}")
+                logger.exception(
+                    f"Failed to reset project folder: {project_path}"
+                )
                 QMessageBox.critical(
                     self,
                     "Error",
                     f"Failed to delete data.\nError: {e}",
                     QMessageBox.Ok,
                 )
-        else:
-            logger.debug("resetProjectFolder cancelled by user")
 
     def convertDataToCSV(self):
-        logger.debug("Event : convertDataToCSV")
-
         dlg = ConvertDataDialog(parent=self)
         if not dlg.exec():
             return
         selection = dlg.get_selection()
 
-        logger.debug(f"Selection: {selection}")
         config.set("dataloaddlg", selection, save=True)
 
         device = selection.get("device", "")
@@ -536,35 +529,36 @@ class KLuxMap(QMainWindow):
 
         if device == "Mag Arrow":
             if not files:
-                logger.info("No files selected for Mag Hawk Arrow. Cancelled by user.")
                 return
-            logger.debug(f"Selected {len(files)} file(s) for Arrow: {files}")
         else:
             mode = option.get("mode", "file")
             if mode == "file":
                 if not files:
-                    logger.info(f"No files selected for {device}. Cancelled by user.")
                     return
-                logger.debug(f"Selected {len(files)} file(s) for {device}: {files}")
             else:
                 if not folder:
-                    logger.info(
-                        f"No directory selected for {device}. Cancelled by user."
-                    )
                     return
-                logger.debug(f"Selected directory for {device}: {folder}")
 
         try:
             if files:
                 last_path = Path(files[0]).parent.parent
             else:
                 last_path = Path(folder).parent
-            logger.debug(f"Last path: {last_path}")
             if last_path:
                 config.set("data_last_dir", str(last_path), save=True)
 
         except Exception as e:
-            logger.error(f"Failed to save last dir: {e}")
+            logger.warning(f"Failed to save last input directory: {e}")
+
+        mode = option.get("mode", "file")
+        if files:
+            logger.info(
+                f"Starting data conversion: device={device}, mode=file, files={len(files)}"
+            )
+        else:
+            logger.info(
+                f"Starting data conversion: device={device}, mode={mode}, folder={folder}"
+            )
 
         convert_with_progress(
             files=files, folder=folder, selection=selection, parent=self
@@ -596,7 +590,6 @@ class KLuxMap(QMainWindow):
         return files, folder
 
     def import_SEC_files(self):
-        logger.debug("import_SEC_file")
         imported_path = make_project_subfolder("Diurnal Data Folder")
         if not imported_path:
             return
@@ -611,13 +604,16 @@ class KLuxMap(QMainWindow):
             or []
         )
 
-        logger.debug(f"{len(files)} SEC files selected: {files}")
         if not files:
-            logger.debug("Import SEC file selection canceled")
             return
+        imported_count = 0
         for file_path in files:
             out_file = load_SEC_file(file_path, imported_path)
-            logger.debug(f"SEC FIle imported to {out_file}")
+            if out_file:
+                imported_count += 1
+        logger.info(
+            f"Imported {imported_count}/{len(files)} SEC files into {imported_path}"
+        )
 
     def _restore_window(self):
         geo = self.settings.value("window/geometry", None)

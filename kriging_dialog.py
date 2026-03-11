@@ -28,7 +28,12 @@ from PySide6.QtWidgets import (
 from myResource import resource_path
 from mySettings import config
 
-__all__ = ["ColorbarRangeDialog", "KrigingPlotDialog_withHead", "suggest_params"]
+__all__ = [
+    "ColorbarRangeDialog",
+    "KrigingPlotDialog",
+    "KrigingPlotDialog_withHead",
+    "suggest_params",
+]
 
 
 def _icon_from_candidates(*names: str) -> QIcon:
@@ -83,7 +88,7 @@ class ColorbarRangeDialog(QDialog):
         buttons.rejected.connect(self.reject)
         layout.addRow(buttons)
 
-    def getValues(self):
+    def get_values(self):
         """Returns the new min and max values, or (None, None) if invalid."""
         try:
             min_val = float(self.min_input.text())
@@ -108,6 +113,10 @@ class ColorbarRangeDialog(QDialog):
         min_val, max_val = self.restore
         self.min_input.setText(f"{min_val:.2f}")
         self.max_input.setText(f"{max_val:.2f}")
+
+    # Backward-compatible alias for older call sites.
+    def getValues(self):
+        return self.get_values()
 
 
 class ShadeSettingsDialog(QDialog):
@@ -303,7 +312,7 @@ def suggest_params(x, y, z, model: str):
     raise ValueError("unknown model")
 
 
-class KrigingPlotDialog_withHead(QDialog):
+class KrigingPlotDialog(QDialog):
     def __init__(self, parent, df_dict, col_name):
         super().__init__(parent)
         self.title = col_name
@@ -325,8 +334,8 @@ class KrigingPlotDialog_withHead(QDialog):
             if {"X", "Y", col_name}.issubset(df.columns):
                 valid_dfs.append(df[["X", "Y", col_name]])
             else:
-                print(
-                    f"[경고] '{name}' 파일에는 '{col_name}' 또는 X/Y 컬럼이 없음 혹은 건너뜀"
+                logger.warning(
+                    f"[Warning] '{name}' is missing '{col_name}' or X/Y columns and will be skipped."
                 )
 
         if not valid_dfs:
@@ -606,7 +615,7 @@ class KrigingPlotDialog_withHead(QDialog):
             self.ax.set_title(f"{self.title} DATA")
 
             if self.shade_cb.isChecked():
-                # LightSource로 음영을 추가해 가독성을 높인다.
+                # Add LightSource shading to improve terrain readability.
                 shade_params = dict(DEFAULT_SHADE_PARAMS)
                 shade_params.update(self.filters.get("shade_params", {}))
                 ls = LightSource(
@@ -678,7 +687,7 @@ class KrigingPlotDialog_withHead(QDialog):
                     )
 
             if self.scatter_cb.isChecked():
-                # 원본 측정 위치를 겹쳐서 표시
+                # Overlay the original measurement locations.
                 self.scatter_plot = self.ax.scatter(
                     self.x,
                     self.y,
@@ -717,7 +726,7 @@ class KrigingPlotDialog_withHead(QDialog):
 
             dlg = ColorbarRangeDialog(self, current_min, current_max)
             if dlg.exec() == QDialog.DialogCode.Accepted:
-                new_min, new_max = dlg.getValues()
+                new_min, new_max = dlg.get_values()
                 if new_min is not None and new_max is not None:
                     self.im.set_clim(vmin=new_min, vmax=new_max)
                     self.canvas.draw_idle()
@@ -730,3 +739,7 @@ class KrigingPlotDialog_withHead(QDialog):
                 pass
         event.accept()
         config.set("kriging", self.filters, save=True)
+
+
+# Backward-compatible alias for older imports.
+KrigingPlotDialog_withHead = KrigingPlotDialog

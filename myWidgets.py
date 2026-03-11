@@ -2,16 +2,11 @@ import os
 from datetime import datetime
 from pathlib import Path
 
-import matplotlib.pyplot as plt
 import numpy as np
-import pandas as pd
 from loguru import logger
-from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
-from PySide6.QtCore import QObject, Qt, QTimer, Signal, QSize
+from PySide6.QtCore import QObject, Qt, Signal, QSize
 from PySide6.QtWidgets import (
-    QApplication,
     QCheckBox,
-    QComboBox,
     QDialog,
     QDialogButtonBox,
     QDial,
@@ -34,18 +29,12 @@ from PySide6.QtWidgets import (
 )
 
 from mySettings import config
-from kriging_dialog import (
-    ColorbarRangeDialog,
-    KrigingPlotDialog_withHead,
-    suggest_params,
-)
 
 
 
 
 class DataFilterDialog(QDialog):
     def __init__(self, parent=None):
-        logger.debug("DataFilterDialog __init__ called")
         super().__init__(parent)
         self.parentWidget = parent
         self.setWindowTitle("Filter Settings")
@@ -111,7 +100,7 @@ class DataFilterDialog(QDialog):
         grid = QGridLayout()
         grid.setColumnStretch(
             0, 1
-        )  # 첫 번째 열에 신축성을 부여하여 오른쪽으로 밀어냅니다.
+        )  # Push the value column to the right.
         # Row 1 (match Calibration Flight order: vertical first)
         self.td_input = QLineEdit("0")  # Top -> Down
         grid.addWidget(
@@ -184,10 +173,8 @@ class DataFilterDialog(QDialog):
         self.load_diurnal_btn.setEnabled(is_checked)
 
     def load_diurnal_data(self):
-        logger.debug("DataFilterDialog load_diurnal_data called")
-        # 이전에 선택한 경로가 있으면 그 경로에서 시작
-        # diurnal_cfg = self.filters.get("Diurnal_Correction", {})
-        start_path = os.path.join(config.get("project_path"), "Diurnal_Data Folder")
+        # Reopen the dialog from the project diurnal folder by default.
+        start_path = os.path.join(config.get("project_path"), "Diurnal Data Folder")
 
         files, _ = QFileDialog.getOpenFileNames(
             parent=self,
@@ -195,8 +182,8 @@ class DataFilterDialog(QDialog):
             dir=start_path,
             filter="Flight data (*.csv);;All files (*)",
         )
-        durinal_cfg = self.filters.setdefault("Diurnal_Correction", {})
-        durinal_cfg["files"] = files
+        diurnal_cfg = self.filters.setdefault("Diurnal_Correction", {})
+        diurnal_cfg["files"] = files
 
     def update_load_button_state(self, state):
         """Enable/disable the load button based on the checkbox state."""
@@ -211,9 +198,8 @@ class DataFilterDialog(QDialog):
         self.bu_input.setEnabled(is_checked)
 
     def calc_calibration_data(self):
-        logger.debug("DataFilterDialog calc_calibration_data called")
         self.parentWidget.calculate_directional_avg_from_df()
-        # 최신 계산값을 config에서 다시 불러와 UI에 반영
+        # Reload the latest calculated values from config into the form.
         filters_line = config.get("filters_line", {})
         cali_cfg = filters_line.get("cali_filter", self.filters.get("cali_filter", {}))
         self.bu_input.setText(str(cali_cfg.get("offset_BU", 0.0)))
@@ -222,7 +208,7 @@ class DataFilterDialog(QDialog):
         self.rl_input.setText(str(cali_cfg.get("offset_RL", 0.0)))
 
     def _read_calibration_file(self, file_path):
-        """Parse calibration.txt and return a direction→value dict.
+        """Parse calibration.txt and return a direction-to-value mapping.
 
         Raises:
             FileNotFoundError: if the calibration file is missing.
@@ -282,7 +268,9 @@ class DataFilterDialog(QDialog):
                 f"calibration.txt not found in the project folder:\n{file_path}",
             )
         except Exception as e:
-            logger.error(f"Failed to load or parse calibration file: {e}")
+            logger.exception(
+                f"Failed to load or parse calibration file: {file_path}"
+            )
             QMessageBox.critical(
                 self, "Load Error", f"Could not load calibration file:\n{e}"
             )
@@ -390,7 +378,6 @@ class DataFilterDialog(QDialog):
         config.set("filters_line", self.filters, save=True)
 
         self.parentWidget.filtering(self.filters.copy())
-        logger.debug("DataFilterDialog accept called")
         super().accept()
 
 
@@ -426,17 +413,6 @@ class DataSettingsDialog(QDialog):
         form.addRow(self.speed_cb)
         form.addRow("Target Speed (m/s):", self.sp_speed)
         form.addRow("Tolerance (m/s):", self.sp_tol)
-
-        # # Colorbar toggle
-        # self.color_cb = QCheckBox("Show Colorbar")
-        # self.color_cb.setChecked(self.fcfg["show_colorbar"])
-        # form.addRow(self.color_cb)
-
-        # # Background Map toggle
-        # self.map_cb = QCheckBox("Show Background Map")
-        # self.map_cb.setChecked(self.fcfg["show_backgroundmap"])
-        # form.addRow(self.map_cb)
-        # self.map_cb.setEnabled(False)
 
         # area bound toggle
         self.show_area_bound_cb = QCheckBox("Apply Area Bound")
@@ -488,8 +464,6 @@ class DataSettingsDialog(QDialog):
         self.fcfg["continuity_filter"]["num_points"] = int(self.cont_num.text())
         self.fcfg["enable_area_bound"] = self.area_bound_cb.isChecked()
         self.fcfg["show_area_bound"] = self.show_area_bound_cb.isChecked()
-        # self.fcfg["show_colorbar"] = self.color_cb.isChecked()
-        # self.fcfg["show_backgroundmap"] = self.map_cb.isChecked()
 
         if self.fcfg["enable_area_bound"]:
             self.MainWindow.polygonDrawer.enable(True)
@@ -507,19 +481,16 @@ class DataSettingsDialog(QDialog):
         self.load_bound_btn.setEnabled(is_checked)
 
     def load_bound_data(self):
-        logger.debug("DataFilterDialog load_bound_data called")
-
-        # 1) 파일 다이얼로그로 boundary 파일(.txt/.csv) 선택
+        # 1) Open a file dialog and select a boundary file (.bln/.csv).
         file_path, _ = QFileDialog.getOpenFileName(
             self,
             "Select Boundary File",
-            "",  # 기본 열릴 디렉터리 (빈 문자열이면 마지막 디렉터리)
+            "",  # Empty string uses the last opened directory.
             "Text Files (*.bln);;CSV Files (*.csv)",
         )
 
-        # 사용자가 취소 클릭했으면 종료
+        # Stop if the user cancels the dialog.
         if not file_path:
-            logger.debug("Boundary file selection canceled")
             return
 
         self.MainWindow.load_bound_file(file_path)
@@ -532,34 +503,34 @@ class OrthogonalPolygonDrawer(QObject):
         super().__init__()
         self.ax = ax
         self.canvas = ax.figure.canvas
-        self.points = []  # 확정된 버텍스 리스트
-        self.lines = []  # 그려진 선 목록
-        self.preview_line = None  # 마우스 무브 시 보여줄 예비 선
-        self.close_threshold = close_threshold_px  # 픽셀 단위
+        self.points = []  # Finalized polygon vertices.
+        self.lines = []  # Drawn line artists.
+        self.preview_line = None  # Preview line shown while moving the mouse.
+        self.close_threshold = close_threshold_px  # Pixel distance used to auto-close.
 
     def on_press(self, event):
-        # 축 영역 내 클릭만 처리
+        # Only process clicks inside the target axes.
         if event.inaxes != self.ax:
             return
         x, y = event.xdata, event.ydata
 
-        # 첫 점 없으면 무조건 추가
+        # The first left click always adds the starting point.
         if not self.points and event.button == 1:
             self.points.append((x, y))
             self.canvas.draw_idle()
             return
 
-        # 클릭이 시작점 근처인지 확인 (픽셀 기준)
+        # Close the polygon if the click lands near the starting point.
         start_x, start_y = self.points[0]
         disp_click = self.ax.transData.transform((x, y))
         disp_start = self.ax.transData.transform((start_x, start_y))
         dist_px = np.hypot(disp_click[0] - disp_start[0], disp_click[1] - disp_start[1])
         if dist_px < self.close_threshold and len(self.points) > 2:
-            # 자동 마감
+            # Close the polygon automatically.
             self._finalize()
             return
 
-        # 일반 클릭: 수평/수직 스냅 후 추가
+        # Add a horizontally or vertically snapped segment.
         if event.button == 1:
             prev_x, prev_y = self.points[-1]
             dx, dy = x - prev_x, y - prev_y
@@ -567,7 +538,7 @@ class OrthogonalPolygonDrawer(QObject):
                 new_pt = (x, prev_y)
             else:
                 new_pt = (prev_x, y)
-            # 선 그리기
+            # Draw the snapped segment.
             (line,) = self.ax.plot(
                 [prev_x, new_pt[0]], [prev_y, new_pt[1]], color="blue", linewidth=2
             )
@@ -576,7 +547,7 @@ class OrthogonalPolygonDrawer(QObject):
             self.canvas.draw_idle()
 
     def on_move(self, event):
-        # 마우스 이동 예비 선 표시
+        # Update the preview line while the mouse is moving.
         if event.inaxes != self.ax or not self.points:
             return
         x, y = event.xdata, event.ydata
@@ -595,12 +566,12 @@ class OrthogonalPolygonDrawer(QObject):
         self.canvas.draw_idle()
 
     def on_key(self, event):
-        # 키로 마감: 엔터 or return
+        # Finish the polygon with Enter or Return.
         if event.key in ("enter", "return") and len(self.points) > 2:
             self._finalize()
 
     def _finalize(self):
-        # 마지막 점과 시작점을 연결
+        # Connect the last point back to the starting point.
         first_x, first_y = self.points[0]
         last_x, last_y = self.points[-1]
         (line,) = self.ax.plot(
@@ -608,7 +579,7 @@ class OrthogonalPolygonDrawer(QObject):
         )
         self.lines.append(line)
 
-        # 예비 선 제거
+        # Remove the preview line.
         if self.preview_line:
             self.preview_line.remove()
             self.preview_line = None
@@ -617,17 +588,14 @@ class OrthogonalPolygonDrawer(QObject):
         self.polygonFinished.emit(self.points)
 
     def disconnect(self):
-        # 이벤트 연결 해제
+        # Disconnect all matplotlib event handlers.
         self.canvas.mpl_disconnect(self.cid_press)
         self.canvas.mpl_disconnect(self.cid_move)
         self.canvas.mpl_disconnect(self.cid_key)
 
     def clear(self):
-        """
-        기존에 그려진 모든 선과 예비선을 제거하고,
-        points와 lines 리스트를 초기 상태로 되돌립니다.
-        """
-        # 1) 화면에서 그려진 선들 제거
+        """Remove the drawn polygon and reset the internal state."""
+        # 1) Remove every line currently drawn on the canvas.
         for line in self.lines:
             try:
                 line.remove()
@@ -635,7 +603,7 @@ class OrthogonalPolygonDrawer(QObject):
                 pass
         self.lines.clear()
 
-        # 2) 예비선 제거
+        # 2) Remove the preview line.
         if self.preview_line:
             try:
                 self.preview_line.remove()
@@ -643,15 +611,15 @@ class OrthogonalPolygonDrawer(QObject):
                 pass
             self.preview_line = None
 
-        # 3) 점 리스트 초기화
+        # 3) Clear the point list.
         self.points.clear()
 
-        # 4) 캔버스 갱신
+        # 4) Refresh the canvas.
         self.canvas.draw_idle()
 
     def enable(self, flag):
         if flag:
-            # 이벤트 연결
+            # Connect canvas events.
             self.cid_press = self.canvas.mpl_connect(
                 "button_press_event", self.on_press
             )
@@ -684,11 +652,11 @@ class ConfigDataSettingsDialog(QDialog):
             self.bound_text.setPlainText("\n".join(lines))
 
         bound_group.setLayout(bound_layout)
-        # Clear 버튼 추가
+        # Add a clear button.
         clear_button = QPushButton("Clear")
         clear_button.clicked.connect(self.clear_bound_area)
 
-        # 버튼을 오른쪽에 정렬
+        # Right-align the button row.
         button_layout = QHBoxLayout()
         button_layout.addStretch()
         button_layout.addWidget(clear_button)
@@ -765,7 +733,7 @@ class CreateProjectDialog(QDialog):
         self.azimuth_dial.setWrapping(True)
         self.azimuth_dial.setNotchesVisible(True)
         self.azimuth_dial.setFixedSize(QSize(140, 140))
-        # Qt draws 0° at the bottom by default; shift by 180° so 0° appears at the top.
+        # Qt draws 0 degrees at the bottom by default; shift by 180 degrees so 0 is at the top.
         self._dial_offset = 180
         self.azimuth_dial.setValue(self._dial_offset)
 
@@ -849,7 +817,6 @@ class CreateProjectDialog(QDialog):
         self._update_azimuth_label(self.azimuth_dial.value())
 
     def accept(self):
-        logger.debug("CreateProjectDialog accept called")
         if not hasattr(self, "fullpath"):
             QMessageBox.warning(
                 self,
@@ -863,13 +830,11 @@ class CreateProjectDialog(QDialog):
         self.selection["direction_str"] = self._format_quadrant_bearing(
             self.selection["direction"]
         )
-        logger.info(f"selection: {self.selection}")
         super().accept()
 
     def open_folder(self):
         folder_path = browse_directory(self)
         if not folder_path:
-            logger.debug("CreateProjectDialog open_folder canceled")
             return
         proj_folder_path = Path(folder_path)
         project_name = self.project_name.text().strip()
@@ -879,7 +844,6 @@ class CreateProjectDialog(QDialog):
         self.project_path.setText(str(proj_folder_path))
         self.fullpath = proj_folder_path / project_name
         self.project_fullpath.setText(str(self.fullpath))
-        logger.debug(f"CreateProjectDialog open_folder called: {self.fullpath}")
 
     def update_fullpath(self):
         base_path = self.project_path.text().strip()
@@ -938,25 +902,17 @@ class CreateProjectDialog(QDialog):
         angle = angle % 360
         if angle <= 45 or angle > 315:
             offset = angle if angle <= 45 else 360 - angle
-            # if offset == 0:
-            #     return "N"
             secondary = "E" if angle <= 45 else "W"
             return f"N {offset}° {secondary}"
         if angle <= 135:
             offset = 90 - angle if angle <= 90 else angle - 90
-            # if offset == 0:
-            #     return "E"
             secondary = "N" if angle < 90 else "S"
             return f"E {offset}° {secondary}"
         if angle <= 225:
             offset = 180 - angle if angle <= 180 else angle - 180
-            # if offset == 0:
-            #     return "S"
             secondary = "E" if angle < 180 else "W"
             return f"S {offset}° {secondary}"
         offset = 270 - angle if angle <= 270 else angle - 270
-        # if offset == 0:
-        #     return "W"
         secondary = "S" if angle < 270 else "N"
         return f"W {offset}° {secondary}"
 
@@ -967,7 +923,7 @@ def browse_files(
     filter_str: str = "All Files (*)",
     caption: str = "Select Files",
 ) -> list[str]:
-    """여러 파일을 선택하도록 QFileDialog 실행"""
+    """Open a QFileDialog for selecting multiple files."""
     start_dir = (
         initial_dir if (initial_dir and os.path.exists(initial_dir)) else os.getcwd()
     )
@@ -980,7 +936,7 @@ def browse_files(
         )
         return files or []
     except Exception as e:
-        logger.error(f"browse_files error: {e}")
+        logger.exception("browse_files failed")
         return []
 
 
@@ -989,7 +945,7 @@ def browse_directory(
     initial_dir: str = "",
     caption: str = "Select Directory",
 ) -> str:
-    """디렉토리를 선택하도록 QFileDialog 실행"""
+    """Open a QFileDialog for selecting a directory."""
     start_dir = (
         initial_dir if (initial_dir and os.path.exists(initial_dir)) else os.getcwd()
     )
@@ -1001,7 +957,7 @@ def browse_directory(
         )
         return folder or ""
     except Exception as e:
-        logger.error(f"browse_directory error: {e}")
+        logger.exception("browse_directory failed")
         return ""
 
 
@@ -1029,6 +985,6 @@ def browse_multidirectiorys(
             return dialog.selectedFiles()
         return []
     except Exception as e:
-        logger.error(f"browse_multidirectiorys error: {e}")
+        logger.exception("browse_multidirectiorys failed")
         return []
 

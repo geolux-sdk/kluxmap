@@ -1,8 +1,7 @@
+import re
 import numpy as np
 import pandas as pd
 from scipy.spatial import cKDTree
-import re
-from loguru import logger
 
 def _odd(n: int) -> int:
     """Return n rounded up to the nearest odd integer."""
@@ -122,15 +121,15 @@ def run_micro_level(scanline_df, w_short, w_long, r_m, min_neigh, col_name):
     """
     Apply micro-levelling to each scanline dataframe in the dict.
 
-    처리 순서:
-      1) 각 라인(딕셔너리 item)별로 mag_rc, mag_1D 계산
-      2) 모든 라인을 한 번에 합쳐서 mag_2D(2D 미디언) 계산
-      3) 다시 라인별로 분리해 corr, mag_level 작성
+    泥섎━ ?쒖꽌:
+      1) 媛??쇱씤(?뺤뀛?덈━ item)蹂꾨줈 mag_rc, mag_1D 怨꾩궛
+      2) 紐⑤뱺 ?쇱씤????踰덉뿉 ?⑹퀜??mag_2D(2D 誘몃뵒?? 怨꾩궛
+      3) ?ㅼ떆 ?쇱씤蹂꾨줈 遺꾨━??corr, mag_level ?묒꽦
 
-    LINE 컬럼 없이 dict item 하나가 한 라인으로 간주된다.
-    추가 컬럼: mag_rc, mag_1D, mag_2D, corr, mag_level
+    LINE 而щ읆 ?놁씠 dict item ?섎굹媛� ???쇱씤?쇰줈 媛꾩＜?쒕떎.
+    異붽? 而щ읆: mag_rc, mag_1D, mag_2D, corr, mag_level
     """
-    # 1) per-line 1D 처리
+    # 1) per-line 1D 泥섎━
     prepared = []
     keys = []
     for key, df in scanline_df.items():
@@ -142,16 +141,14 @@ def run_micro_level(scanline_df, w_short, w_long, r_m, min_neigh, col_name):
             raise KeyError("run_micro_level requires X and Y columns.")
 
         work = df.copy()
-        # sens_col = work.columns[-1]  # 마지막 컬럼을 신호로 사용
         sens_col = col_name
-        logger.debug(f"Processing scanline '{key}' with signal column '{sens_col}'")
         sens = pd.to_numeric(work[sens_col], errors="coerce").to_numpy(float)
 
         work["mag_rc"] = roll_med(sens, w_short)
         work["mag_1D"] = roll_med(work["mag_rc"].to_numpy(float), w_long)
         prepared.append(work)
 
-    # 2) 모든 라인 합쳐서 2D median 실행
+    # 2) 紐⑤뱺 ?쇱씤 ?⑹퀜??2D median ?ㅽ뻾
     concat_df = pd.concat(
         prepared, keys=keys, names=["scanline", "orig_idx"], axis=0, copy=False
     )
@@ -166,7 +163,7 @@ def run_micro_level(scanline_df, w_short, w_long, r_m, min_neigh, col_name):
         min_neighbors=min_neigh,
     )
 
-    # 3) corr, mag_level 작성 후 다시 분할
+    # 3) corr, mag_level ?묒꽦 ???ㅼ떆 遺꾪븷
     concat_df["corr"] = concat_df["mag_2D"] - concat_df["mag_1D"]
     concat_df["Mag_Level"] = concat_df["mag_rc"] + concat_df["corr"]
     # drop intermediate columns; keep mag_level plus original fields
@@ -179,5 +176,4 @@ def run_micro_level(scanline_df, w_short, w_long, r_m, min_neigh, col_name):
     for key in keys:
         part = concat_df.xs(key, level="scanline").copy()
         out[key] = part
-    logger.debug(f"Completed micro-levelling for {len(out)} scanlines.")
     return out

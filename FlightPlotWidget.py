@@ -2,7 +2,6 @@ import math
 import os
 from pathlib import Path
 from typing import Optional
-from xml.sax.saxutils import escape
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -22,7 +21,7 @@ MAP_TYPE_OPTIONS = (
     ("Terrain", "terrain"),
 )
 
-# 파일 상단에 추가
+# Widget imports
 from PySide6.QtCore import Qt, QSize, QSettings, QSignalBlocker, Slot
 from PySide6.QtGui import (
     QAction,
@@ -52,9 +51,10 @@ from PySide6.QtWidgets import (
 )
 
 from DataManager import DataManager
+from kriging_dialog import ColorbarRangeDialog
 from myResource import resource_path
 from mySettings import config
-from myWidgets import ColorbarRangeDialog, DataSettingsDialog, OrthogonalPolygonDrawer
+from myWidgets import DataSettingsDialog, OrthogonalPolygonDrawer
 from segment_utils import subtract_intervals
 
 
@@ -92,7 +92,7 @@ class FlightPlotWidget(QWidget):
         self._line_last_mouse_pos = None
 
         config.get("filters", {})
-        # 배경 지도는 항상 none으로 시작하며 설정을 저장하지 않는다.
+        # Always start with no background map; do not persist a default map type.
         self.map_type = "none"
         self._map_pixmap: Optional[QPixmap] = None
         self._map_image = None
@@ -121,12 +121,12 @@ class FlightPlotWidget(QWidget):
         toolbar = QToolBar(self)
         toolbar.setIconSize(QSize(32, 32))
 
-        self.actionOpenFileBrower = QAction(
+        self.actionOpenFileBrowser = QAction(
             QIcon(resource_path("imag_data_import.png")),
             "&Open File Browser",
             self,
         )
-        self.actionOpenFileBrower.setStatusTip("Open Project Browser")
+        self.actionOpenFileBrowser.setStatusTip("Open project browser")
 
         self.actionDataCutDisp = QAction(
             QIcon(resource_path("imag_cut.png")), "Line Cut", self
@@ -134,10 +134,10 @@ class FlightPlotWidget(QWidget):
         self.actionDataCutDisp.setStatusTip("Line Cut")
         self.actionDataCutDisp.setCheckable(True)
 
-        self.actionDataConfiDisp = QAction(
+        self.actionDataConfig = QAction(
             QIcon(resource_path("filter.png")), "Trim Filters", self
         )
-        self.actionDataConfiDisp.setStatusTip("Trim Filters Settings")
+        self.actionDataConfig.setStatusTip("Trim filter settings")
 
         self.actionDataJoinDisp = QAction(
             QIcon(resource_path("imag_sum.png")), "Line Append", self
@@ -150,20 +150,17 @@ class FlightPlotWidget(QWidget):
         )
         self.actionDataOut.setStatusTip("Export KML FILE")
 
-        toolbar.addAction(self.actionOpenFileBrower)
-        toolbar.addAction(self.actionDataConfiDisp)
+        toolbar.addAction(self.actionOpenFileBrowser)
+        toolbar.addAction(self.actionDataConfig)
         toolbar.addAction(self.actionDataCutDisp)
         toolbar.addAction(self.actionDataJoinDisp)
         toolbar.addAction(self.actionDataOut)
 
-        # 레이아웃에 툴바와 실제 콘텐츠(MainWidget)를 추가
+        # Add the toolbar above the main content area.
         layout.addWidget(toolbar)
 
-        # 메인 레이아웃 설정
+        # Main layout
         vbox_layout = QVBoxLayout()
-        # vbox_layout.addWidget(
-        #     self.createProjectLabel(), alignment=Qt.AlignmentFlag.AlignLeft
-        # )
         vbox_layout.addWidget(
             self.createFileList(), alignment=Qt.AlignmentFlag.AlignLeft
         )
@@ -178,13 +175,8 @@ class FlightPlotWidget(QWidget):
         ctrl_panel.setLineWidth(3)
         ctrl_panel.setLayout(vbox_layout)
         ctrl_panel.setMaximumWidth(300)
-        # ctrl_panel.setFrameShape(QFrame.Shape.StyledPanel)
 
         canvas_layout = QHBoxLayout()
-
-        # canvas_layout.addWidget(
-        #     self.createCanvasPlot(), alignment=Qt.AlignmentFlag.AlignHCenter
-        # )
         canvas_layout.addWidget(self.createPlotTabs(), 1)
 
         main_layout = QHBoxLayout()
@@ -197,22 +189,22 @@ class FlightPlotWidget(QWidget):
         self.polygonDrawer = OrthogonalPolygonDrawer(self.ax)
         self.polygonDrawer.polygonFinished.connect(self.modify)
 
-        # 초기 비활성화
-        self.actionOpenFileBrower.setEnabled(False)
+        # Disable actions until a project is opened.
+        self.actionOpenFileBrowser.setEnabled(False)
         self.actionDataCutDisp.setEnabled(False)
-        self.actionDataConfiDisp.setEnabled(False)
+        self.actionDataConfig.setEnabled(False)
         self.actionDataJoinDisp.setEnabled(False)
         self.actionDataOut.setEnabled(False)
 
-        self.connectSingnal()
+        self.connectSignals()
         self._line_undo_shortcut = QShortcut(QKeySequence("Ctrl+Z"), self)
         self._line_undo_shortcut.activated.connect(self._undo_line_edit)
         self._line_redo_shortcut = QShortcut(QKeySequence("Ctrl+Y"), self)
         self._line_redo_shortcut.activated.connect(self._redo_line_edit)
 
-    def connectSingnal(self):
-        self.actionOpenFileBrower.triggered.connect(self.openFIleBrowser)
-        self.actionDataConfiDisp.triggered.connect(
+    def connectSignals(self):
+        self.actionOpenFileBrowser.triggered.connect(self.openFileBrowser)
+        self.actionDataConfig.triggered.connect(
             lambda checked=False: DataSettingsDialog(parent=self).exec()
         )
         self.actionDataCutDisp.toggled.connect(self._on_linecut_toggled)
@@ -221,9 +213,9 @@ class FlightPlotWidget(QWidget):
 
     def actionEnable(self, action=True):
         self._actions_enabled = action
-        self.actionOpenFileBrower.setEnabled(action)
+        self.actionOpenFileBrowser.setEnabled(action)
         self.actionDataCutDisp.setEnabled(action)   
-        self.actionDataConfiDisp.setEnabled(action)
+        self.actionDataConfig.setEnabled(action)
         self.actionDataJoinDisp.setEnabled(action)
         self.actionDataOut.setEnabled(action)
         if hasattr(self, "plotTabs"):
@@ -255,31 +247,6 @@ class FlightPlotWidget(QWidget):
         if hasattr(self, "line_canvas") and self.line_canvas is not None:
             self.line_canvas.setCursor(cursor)
         
-    def createProjectLabel(self):
-        # "프로젝트:" 텍스트를 위한 QLabel
-        lbl_project_text = QLabel("Project:")
-        lbl_project_text.setAlignment(
-            Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft
-        )
-        # 폴더 경로를 표시하는 QLabel
-        self.lbl_folder_path = QLabel("")
-        self.lbl_folder_path.setAlignment(
-            Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft
-        )
-        # self.lbl_folder_path.setMinimumWidth(200)
-        # self.lbl_folder_path.setMaximumWidth(300)
-
-        # QLabel들을 레이아웃에 배치
-        layout = QHBoxLayout()
-        layout.addWidget(lbl_project_text)
-        layout.addWidget(self.lbl_folder_path)
-
-        # 위젯에 레이아웃 설정
-        widget = QWidget()
-        widget.setLayout(layout)
-
-        return widget
-
     def createLogoLabel(self):
         lbl_logo = QLabel("")
         lbl_logo.setPixmap(
@@ -295,7 +262,7 @@ class FlightPlotWidget(QWidget):
         return lbl_logo
 
     def createFileList(self):
-        """파일 목록을 보여주는 리스트 위젯을 생성하는 메서드"""
+        """Create the list widget that shows the loaded file names."""
         self.fileListWidget = QListWidget()
         self.fileListWidget.setSelectionMode(
             QAbstractItemView.SelectionMode.MultiSelection
@@ -534,8 +501,8 @@ class FlightPlotWidget(QWidget):
             return
         base_enabled = getattr(self, "_actions_enabled", False)
         self.fileListWidget.setEnabled(base_enabled and not is_line_tab)
-        self.actionOpenFileBrower.setEnabled(base_enabled and not is_line_tab)
-        self.actionDataConfiDisp.setEnabled(base_enabled and not is_line_tab)
+        self.actionOpenFileBrowser.setEnabled(base_enabled and not is_line_tab)
+        self.actionDataConfig.setEnabled(base_enabled and not is_line_tab)
         if not is_line_tab:
             if self.actionDataCutDisp.isChecked():
                 self.actionDataCutDisp.setChecked(False)
@@ -546,7 +513,7 @@ class FlightPlotWidget(QWidget):
 
     def createCanvasPlot(self):
         """Create a canvas plot using matplotlib"""
-        # matplotlib plot 설정
+        # Configure the matplotlib plot.
         self.fig, self.ax = plt.subplots(figsize=(10, 8), dpi=100)
 
         self.ax.set_title("Mag Plot")
@@ -556,7 +523,7 @@ class FlightPlotWidget(QWidget):
         self.ax.set_aspect("equal")
 
         plt.tight_layout(pad=1.0, w_pad=1.5, h_pad=1)
-        # matplotlib canvas를 PyQt6 위젯으로 변환하여 반환
+        # Wrap the matplotlib canvas as a PyQt6 widget.
         self.canvas = FigureCanvas(self.fig)
 
         self.canvas.mpl_connect("scroll_event", self.scroll)
@@ -657,7 +624,6 @@ class FlightPlotWidget(QWidget):
         self.line_canvas.draw_idle()
 
     def on_resize(self, event):
-        # self.updatePlot()
         self._fit_bounds_to_canvas_equal(margin_ratio=0.05)
 
     def on_press(self, event):
@@ -1071,7 +1037,6 @@ class FlightPlotWidget(QWidget):
 
     def on_item_clicked(self, item):
         file_name = item.text()
-        logger.debug(f"Item clicked: {file_name}")
         self.updatePlot()
 
     def on_file_selection_changed(self):
@@ -1081,7 +1046,7 @@ class FlightPlotWidget(QWidget):
             return
         self.updatePlot()
 
-    def clac_XYlimit_listAll(self):
+    def calc_XYlimit_listAll(self):
         all_x, all_y = [], []
         combined_df = getattr(self.db, "combined_df", None)
         if (
@@ -1282,13 +1247,13 @@ class FlightPlotWidget(QWidget):
                 f.write('<kml xmlns="http://www.opengis.net/kml/2.2">\n')
                 f.write("  <Document>\n")
                 f.write("    <name>Flight Plot</name>\n")
-                # Line 스타일
+                # Line style
                 f.write(
                     "    <Style id=\"lineStyle\">"
                     "<LineStyle><color>ff0000ff</color><width>3</width></LineStyle>"
                     "</Style>\n"
                 )
-                # Point 스타일
+                # Point style
                 f.write(
                     "    <Style id=\"ptStyle\">"
                     "<IconStyle><scale>0.7</scale>"
@@ -1297,7 +1262,7 @@ class FlightPlotWidget(QWidget):
                     "</Style>\n"
                 )
 
-                # 어느 탭에서 저장하는지에 따라 데이터 소스 선택
+                # Choose the data source based on the active tab.
                 use_line_tab = (
                     hasattr(self, "plotTabs")
                     and self.plotTabs.tabText(self.plotTabs.currentIndex()) == "Line"
@@ -1696,7 +1661,7 @@ class FlightPlotWidget(QWidget):
 
         self.line_ax.clear()
 
-        # Flight 탭에서 받아둔 배경 지도 이미지를 Line 탭에도 표시
+        # Reuse the background map from the Flight tab in the Line tab.
         self._line_map_artist = None
         if (
             self.map_type
@@ -1772,25 +1737,19 @@ class FlightPlotWidget(QWidget):
         self.line_canvas.draw()
 
     def updatePlot(self):
-        logger.debug("updatePlot")
         cfg = config.get("filters")
         direction_degree = config.get("direction")
 
-        logger.debug(
-            f"plot setup: map_type={self.map_type}, cfg_background={cfg.get('background_map_type') if cfg else None}"
-        )
-
         try:
-            # --- 1) 선택된 파일 목록 확보 ---
+            # --- 1) Collect the selected file list ---
             selected = [item.text() for item in self.fileListWidget.selectedItems()]
-            logger.debug(f"plot setup: selected files count={len(selected)}")
             if not selected:
                 self._clear_plot_for_empty_selection(
                     "No files selected  to plot."
                 )
                 return
 
-            # --- 2) 파일별 X, Y, 값 추출 ---
+            # --- 2) Extract X, Y, and values for each file ---
             all_x, all_y, all_vals = [], [], []
             all_lat, all_lon = [], []
             file_data_list = []
@@ -1806,7 +1765,7 @@ class FlightPlotWidget(QWidget):
                     for idx, sid in enumerate(timeline.source_ids)
                 }
             except Exception as e:
-                logger.error(f"Failed to create timeline for plot: {e}")
+                logger.exception("Failed to create plot timeline")
             data_epsg = None
             for filename in selected:
                 src_df = self.db.get_FlightData(filename)
@@ -1846,7 +1805,9 @@ class FlightPlotWidget(QWidget):
                         )
                         seg_df = self.db.materialize_segment_df(segment_id)
                     except Exception as e:
-                        logger.error(f"Segment scatter failed: {e}")
+                        logger.exception(
+                            f"Failed to build scatter segment for flight file '{filename}'"
+                        )
 
                 if seg_df is None or seg_df.empty:
                     seg_df = base_df
@@ -1896,10 +1857,6 @@ class FlightPlotWidget(QWidget):
                 self._clear_plot_for_empty_selection("No data to plot.")
                 return
 
-            # # --- 3) 전체 경계 계산 ---
-            # minx, maxx = np.min(all_x), np.max(all_x)
-            # miny, maxy = np.min(all_y), np.max(all_y)
-            # pad = 100
             vmin = np.min(all_vals)
             vmax = np.max(all_vals)
             self.values_colorbar = (vmin, vmax)
@@ -1910,14 +1867,14 @@ class FlightPlotWidget(QWidget):
                     all_lat, all_lon, data_epsg=data_epsg
                 )
 
-            data_minx, data_maxx, data_miny, data_maxy = self.clac_XYlimit_listAll()
-            # 축은 항상 데이터 범위에 맞추어 배경 없음 상태와 동일한 크기로 시작
-            # 배경 이미지가 더 크더라도 imshow extent가 지도 전체를 포함하므로 확대/이동 시 모두 볼 수 있음
+            data_minx, data_maxx, data_miny, data_maxy = self.calc_XYlimit_listAll()
+            # Always start the axes at the data bounds, matching the no-background view.
+            # Even if the image is larger, the imshow extent still covers the full map during pan/zoom.
             self.ax.set_xlim(data_minx, data_maxx)
             self.ax.set_ylim(data_miny, data_maxy)
             if map_drawn and self._map_image is not None and self._map_extent:
                 try:
-                    # 받은 전체 배경 이미지를 원래 지도 범위에 맞춰 표시
+                    # Draw the fetched background image using the original map extent.
                     display_extent = self._map_extent
                     if self._map_artist is None:
                         self._map_artist = self.ax.imshow(
@@ -1931,11 +1888,8 @@ class FlightPlotWidget(QWidget):
                         self._map_artist.set_data(self._map_image)
                         self._map_artist.set_extent(display_extent)
                         self._map_artist.set_visible(True)
-                    logger.debug(
-                        f"map draw: imshow done with extent={display_extent}, image_shape={self._map_image.shape if hasattr(self._map_image, 'shape') else None}"
-                    )
                 except Exception as e:
-                    logger.error(f"Failed to draw background map: {e}")
+                    logger.exception("Failed to draw background map")
                     map_drawn = False
                     self._map_image = None
                     self._map_extent = None
@@ -1944,7 +1898,7 @@ class FlightPlotWidget(QWidget):
                     self._map_artist.set_visible(False)
 
 
-            # # --- 5) 컬러맵 설정 ---
+            # # --- 5) Configure the colormap ---
             show_cb = cfg.get("show_colorbar", False)
             palette = plt.get_cmap("tab10").colors
             self._clear_legend()
@@ -2046,11 +2000,11 @@ class FlightPlotWidget(QWidget):
                     )
                     overlay_artists.append(point)
             self._overlay_artists = overlay_artists
-            # 오프셋 모드 끄기 → 절대값 그대로 표시
+            # Disable offset notation so absolute values remain visible.
             self.ax.ticklabel_format(useOffset=False, style="plain", axis="x")
             self.ax.ticklabel_format(useOffset=False, style="plain", axis="y")
 
-            # --- 8) 스타일 ---
+            # --- 8) Styling ---
             self.ax.set_title("Mag Plot")
             self.ax.set_xlabel("Easting (m)")
             self.ax.set_ylabel("Northing (m)")
@@ -2058,9 +2012,8 @@ class FlightPlotWidget(QWidget):
             self.ax.set_aspect("equal")
 
         except Exception as err:
-            logger.error(f"Update Plot : {repr(err)}")
+            logger.exception("Flight plot update failed")
 
-        # self._fit_bounds_to_canvas_equal(margin_ratio=0.05)
         self.fig.tight_layout()
         self.canvas.draw()
         if (
@@ -2070,45 +2023,41 @@ class FlightPlotWidget(QWidget):
             self.updateLinePlot()
 
     def _fit_bounds_to_canvas_equal(self, margin_ratio=0.05):
-        logger.debug("_fit_bounds_to_canvas_equal")
-        """aspect=equal(1:1) 유지하면서 캔버스 비율에 맞게 x/y 범위를 확장해 꽉 채우기."""
+        """Expand x/y limits to fit the canvas while keeping aspect=equal (1:1)."""
         ax = self.ax
-        # 현재 데이터 경계
+        # Current data bounds
         x1, x2 = ax.get_xlim()
         y1, y2 = ax.get_ylim()
 
-        # 데이터 범위 계산
+        # Compute the data range
         rx = max(x2 - x1, 1e-12)
         ry = max(y2 - y1, 1e-12)
 
-        # # 5% 여백 적용 (이미 여백을 넣어 설정했다면 생략 가능)
+        # # Apply a 5% margin if extra padding has not already been added.
         cx = (x1 + x2) * 0.5
         cy = (y1 + y2) * 0.5
 
-        # 캔버스 픽셀 비율
+        # Canvas pixel aspect ratio
         w, h = self.canvas.get_width_height()
         if h <= 0:
             h = 1
-        canvas_ratio = w / h  # (가로/세로)
+        canvas_ratio = w / h  # (width/height)
 
-        # aspect=equal(1:1)을 유지하려면 데이터의 (rx/ry)도 canvas_ratio로 맞춰야 함
+        # Match the data rx/ry ratio to the canvas ratio to preserve aspect=equal.
         data_ratio = rx / ry
         if data_ratio < canvas_ratio:
-            # 가로가 부족 → rx를 늘림
+            # Increase rx when the width is too small.
             rx = canvas_ratio * ry
         else:
-            # 세로가 부족 → ry를 늘림
+            # Increase ry when the height is too small.
             ry = rx / canvas_ratio
 
-        # 새 경계 설정(센터 고정)
+        # Apply the new bounds while keeping the center fixed.
         new_x1, new_x2 = cx - rx * 0.5, cx + rx * 0.5
         new_y1, new_y2 = cy - ry * 0.5, cy + ry * 0.5
 
         ax.set_xlim(new_x1, new_x2)
         ax.set_ylim(new_y1, new_y2)
-        logger.debug(
-            f"new_x1: {new_x1}, new_x2: {new_x2}, new_y1: {new_y1}, new_y2: {new_y2}"
-        )
         self.ax.set_aspect("equal")
         self.canvas.draw_idle()
 
@@ -2144,7 +2093,7 @@ class FlightPlotWidget(QWidget):
         canvas.draw_idle()
 
     def updateFileList(self, files):
-        """선택된 폴더의 파일 목록을 리스트 위젯에 업데이트"""
+        """Update the list widget with files from the selected folder."""
         blocker = QSignalBlocker(self.fileListWidget)
         self.fileListWidget.clear()
 
@@ -2173,8 +2122,7 @@ class FlightPlotWidget(QWidget):
         )
         apply_area = user_response == QMessageBox.StandardButton.Yes
         if apply_area:
-            for idx, (x, y) in enumerate(points):
-                logger.debug(f"Vertex {idx}: {x:.6f}, {y:.6f}")
+            logger.info(f"Applied area selection with {len(points)} polygon point(s)")
             config.set("bound_area_points", points, save=True)
         self.polygonDrawer.clear()
         self.polygonDrawer.enable(False)
@@ -2193,15 +2141,13 @@ class FlightPlotWidget(QWidget):
             self.updatePlot()
 
     def load_bound_file(self, file_path):
-        logger.debug(f"load_bound_file {file_path}")
-
         try:
             with open(file_path, "r", encoding="utf-8") as f:
                 lines = f.readlines()
 
-            # 첫 줄은 점의 개수 또는 무시해도 되는 숫자라고 가정
+            # Assume the first line is a count/header and skip it.
             vertex_points = []
-            for line in lines[1:]:  # 첫 줄은 건너뜀
+            for line in lines[1:]:  # Skip the first line
                 parts = line.strip().split()
                 if len(parts) != 2:
                     logger.warning(f"Invalid line: {line.strip()}")
@@ -2209,7 +2155,7 @@ class FlightPlotWidget(QWidget):
                 x, y = map(float, parts)
                 vertex_points.append((x, y))
 
-            # 닫혀 있지 않으면 시작점 추가해서 닫기
+            # Close the polygon if the first and last vertices are different.
             if vertex_points and vertex_points[0] != vertex_points[-1]:
                 vertex_points.append(vertex_points[0])
 
@@ -2218,15 +2164,14 @@ class FlightPlotWidget(QWidget):
             self.updatePlot()
 
         except Exception as e:
-            logger.error(f"load_bound_file 오류: {repr(e)}")
+            logger.exception(f"Failed to load boundary file: {file_path}")
             QMessageBox.critical(
                 self,
                 "File Error",
                 f"An error occurred while opening or processing the file: {repr(e)}",
             )
 
-    def openFIleBrowser(self):
-        logger.debug("openFIleBrowser")
+    def openFileBrowser(self):
         proj_path = Path(config.get("project_path", ""))
         if not proj_path:
             QMessageBox.warning(self, "ERROR", "Open a project folder first.")
@@ -2238,7 +2183,6 @@ class FlightPlotWidget(QWidget):
             dir=str(open_path),
             filter="Flight data (*.csv);;All files (*)",
         )
-        logger.debug(f"Selected files: {files}")
         if not files:
             return
 
@@ -2251,11 +2195,10 @@ class FlightPlotWidget(QWidget):
 
         list_files = list(set(list_files))
         config.set("Flight_File_List", list_files, save=True)
+        logger.info(f"Added {len(files)} flight data file(s) from {open_path}")
         self.updateFileList(list_files)
 
     def initialize(self):
-        logger.debug("initialize")
-
         filters_defaults = {
             "direction_filter": {"enabled": False, "threshold": 5},
             "continuity_filter": {"enabled": False, "num_points": 10},
@@ -2273,14 +2216,11 @@ class FlightPlotWidget(QWidget):
             for key, value in filters_defaults.items():
                 filters.setdefault(key, value)
 
-        # 배경 지도 설정은 저장하지 않고 항상 none으로 시작
+        # Do not persist background map selection; always start from `none`.
         if "background_map_type" in filters:
             filters.pop("background_map_type", None)
         config.set("filters", filters, save=True)
         self._set_map_type("none", update_plot=False, log_source="initialize")
-        logger.debug(
-            f"initialize: filters loaded (background_map_type={self.map_type}, show_backgroundmap={filters.get('show_backgroundmap')})"
-        )
 
         flightData_path = os.path.join(
             config.get("project_path", ""), "Measure Flight Folder"
@@ -2290,6 +2230,9 @@ class FlightPlotWidget(QWidget):
 
         list_files = config.get("Flight_File_List", [])
         self.updateFileList(list_files)
+        logger.info(
+            f"Flight plot initialized with {len(list_files)} project flight file(s)"
+        )
 
     def show_file_list_context_menu(self, position):
         item = self.fileListWidget.itemAt(position)
@@ -2364,7 +2307,7 @@ class FlightPlotWidget(QWidget):
 
         dlg = ColorbarRangeDialog(self, current_min, current_max, self.values_colorbar)
         if dlg.exec() == QDialog.DialogCode.Accepted:
-            new_min, new_max = dlg.getValues()
+            new_min, new_max = dlg.get_values()
             if new_min is not None and new_max is not None:
                 self.sm.set_clim(vmin=new_min, vmax=new_max)
                 self.canvas.draw()
@@ -2398,11 +2341,10 @@ class FlightPlotWidget(QWidget):
         chosen = map_type or "none"
         current = self.map_type or "none"
         if chosen == current:
-            logger.debug(f"map type: chosen={chosen}, unchanged -> skip update")
             return
         self.map_type = chosen
         self._sync_map_type_selector(chosen)
-        logger.debug(f"map type: chosen={chosen}, updating plot (source={log_source})")
+        logger.info(f"Background map type changed to '{chosen}'")
         if update_plot:
             self.updatePlot()
 
@@ -2422,7 +2364,6 @@ class FlightPlotWidget(QWidget):
             "terrain": "terrain",
         }
         current = self.map_type or "none"
-        logger.debug(f"map menu: current background_map_type={current}")
         for label, value in actions.items():
             act = menu.addAction(label)
             act.setCheckable(True)
@@ -2434,28 +2375,19 @@ class FlightPlotWidget(QWidget):
             return
 
         chosen = selected_action.data()
-        if chosen == current:
-            logger.debug(f"map menu: chosen={chosen}, unchanged -> skip update")
-            return
-
-        self.map_type = chosen
-        logger.debug(f"map menu: chosen={chosen}, updating plot (not persisted)")
-        self.updatePlot()
+        self._set_map_type(str(chosen), log_source="context_menu")
 
     def _get_api_key(self) -> Optional[str]:
         # Prefer environment/user settings; embedded key is a last resort and may be blocked.
         key = os.environ.get("GOOGLE_MAPS_API_KEY")
         if key:
-            logger.debug("API key source: environment variable GOOGLE_MAPS_API_KEY")
             return key.strip()
         settings = QSettings("Geolux", "KLuxMap")
         stored_key = settings.value("google_maps_api_key", "", type=str)
         if stored_key:
-            logger.debug("API key source: QSettings google_maps_api_key")
             return stored_key.strip()
         cfg_key = config.get("google_maps_api_key")
         if cfg_key:
-            logger.debug("API key source: config['google_maps_api_key']")
             return str(cfg_key).strip()
         if GOOGLE_MAPS_API_KEY_HARDCODED:
             logger.warning(
@@ -2492,7 +2424,7 @@ class FlightPlotWidget(QWidget):
         min_span = 0.0005
         lat_range = max(lat_range, min_span) * 2
         lon_range = max(lon_range, min_span) * 2
-        # 이미지가 정사각형(1280x1280)에 맞게 비율 1:1 유지
+        # Keep a 1:1 ratio for the square image canvas (1280x1280).
         square_span = max(lat_range, lon_range)
         lat_range = square_span
         lon_range = square_span
@@ -2522,7 +2454,7 @@ class FlightPlotWidget(QWidget):
         arr = np.frombuffer(buffer, np.uint8, count=expected_size).reshape(
             (image.height(), image.bytesPerLine() // 4, 4)
         )
-        # copy()로 QImage 소멸 후에도 안전하게 사용
+        # Use copy() so the array remains valid after QImage is released.
         return arr.copy()
 
     def _latlon_to_utm_extent(self, bounds: dict, data_epsg: Optional[int]):
@@ -2550,9 +2482,6 @@ class FlightPlotWidget(QWidget):
             bounds = self._latlon_bounds(latitudes, longitudes)
             if not bounds:
                 return False
-            logger.debug(
-                f"map fetch: map_type={self.map_type}, center={bounds['center']}, spans(lat,lon)=({bounds['lat_span']},{bounds['lon_span']})"
-            )
 
             api_key = self._get_api_key()
             if not api_key:
@@ -2571,11 +2500,8 @@ class FlightPlotWidget(QWidget):
                 size_w * scale,
                 size_h * scale,
             )
-            logger.debug(
-                f"map fetch: size=({size_w}x{size_h}) scale={scale} zoom={zoom} data_epsg={data_epsg}"
-            )
 
-            # 캐시 키: 지도 유형/중심/스팬/줌/EPSG 기준 (size/scale 제외)
+            # Cache key based on map type, center, span, zoom, and EPSG (excluding size/scale).
             cache_key = (
                 self.map_type,
                 round(bounds["center"][0], 7),
@@ -2590,10 +2516,9 @@ class FlightPlotWidget(QWidget):
                 if cached_img is not None and cached_extent is not None:
                     self._map_image = cached_img
                     self._map_extent = cached_extent
-                    logger.debug("map fetch: using cached image (skipping request)")
                     return True
 
-            # 캐시 미스: 이전 지도 상태는 초기화
+            # Cache miss: reset the previous map state.
             self._map_image = None
             self._map_extent = None
 
@@ -2603,16 +2528,11 @@ class FlightPlotWidget(QWidget):
                 f"&zoom={zoom}&size={size_w}x{size_h}&scale={scale}"
                 f"&maptype={self.map_type}&key={api_key}"
             )
-            safe_url = url.replace(api_key, "***")
-            logger.info(f"map fetch url (key masked): {safe_url}")
 
             resp = None
             try:
                 resp = requests.get(url, timeout=10)
                 resp.raise_for_status()
-                logger.debug(
-                    f"map fetch: http_status={resp.status_code} content_length={len(resp.content)}"
-                )
             except requests.HTTPError as e:
                 status = getattr(resp, "status_code", None)
                 if status == 403:
@@ -2621,19 +2541,18 @@ class FlightPlotWidget(QWidget):
                         "Verify GOOGLE_MAPS_API_KEY, billing status, and Static Maps API enablement."
                     )
                 else:
-                    logger.error(f"Failed to fetch Static Map (HTTP {status}): {e}")
+                    logger.error(
+                        f"Failed to fetch Static Map (HTTP {status}, map_type={self.map_type}, zoom={zoom}): {e}"
+                    )
                 return False
             except Exception as e:
-                logger.error(f"Failed to fetch Static Map: {e}")
+                logger.exception("Failed to fetch Static Map")
                 return False
 
             pix = QPixmap()
             if not pix.loadFromData(resp.content):
                 logger.error("Failed to load map image from response content.")
                 return False
-            logger.debug(
-                f"map fetch: pixmap loaded size=({pix.width()}x{pix.height()}) bytes={resp.headers.get('Content-Length')}"
-            )
             self._map_pixmap = pix
             image = pix.toImage()
             self._map_image = self._qt_image_to_array(image)
@@ -2644,7 +2563,6 @@ class FlightPlotWidget(QWidget):
                 return False
             self._map_extent = extent
             self._map_cache[cache_key] = (self._map_image, self._map_extent)
-            logger.debug(f"map fetch: computed UTM extent={extent}, last_epsg={self._last_epsg}")
             return True
         except Exception as e:
             logger.exception(f"_update_background_map unexpected failure: {e}")

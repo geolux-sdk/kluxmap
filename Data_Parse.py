@@ -162,10 +162,8 @@ class DataConverter:
             logger.error(
                 f"Error: File {output_file} is already in use so it cannot be saved."
             )
-        except Exception as e:
-            logger.error(f"Error: '{input_file}' An unexpected error occurred: {e}")
-        else:
-            logger.info(f"File {output_file} has been succesfully created.")
+        except Exception:
+            logger.exception(f"Unexpected error while converting '{input_file}'")
 
     def merge_csv_files_in_folder(self, folder_path, results_path, sampling_rate):
         csv_files = [f for f in os.listdir(folder_path) if f.endswith(".csv")]
@@ -186,6 +184,7 @@ class DataConverter:
                 results_path, f"{folder_name}_{sampling_rate}.csv"
             )
             merged_df.to_csv(output_path, index=False)
+            logger.info(f"Merged {len(df_list)} CSV file(s) into {output_path}")
         else:
             logger.error(f"No CSV files found in {folder_path}")
 
@@ -250,12 +249,10 @@ class DataConverter:
 
 
 def importMagArrowFile(file_path, dest_folder_path, cfg):
-    logger.debug(f"importMagArrowFile({file_path}, {dest_folder_path}, {cfg})")
     if os.path.exists(file_path):
         basename = os.path.basename(file_path)
         name_only, ext = os.path.splitext(basename)
         dest_path = os.path.join(dest_folder_path, name_only + ".csv")
-        logger.debug(f"dest_path={dest_path}")
         try:
             rows_buf = StringIO()
             with open(file_path, "r", encoding="utf-8", errors="replace") as fr:
@@ -279,6 +276,6 @@ def importMagArrowFile(file_path, dest_folder_path, cfg):
 
             df_1hz.to_csv(dest_path, index=False)
             return True
-        except Exception as e:
-            logger.error(f"importMagArrow Error: {e}")
+        except Exception:
+            logger.exception(f"Failed to import Mag Arrow file: {file_path}")
             return False

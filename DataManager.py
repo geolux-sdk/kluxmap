@@ -1,4 +1,3 @@
-import os
 from bisect import bisect_right
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -77,7 +76,6 @@ class DataManager:
         self.scanline_cross_groups: list[list[tuple[str, list[tuple[int, int]]]]] = []
 
     def clear_FlightData(self):
-        logger.debug("clear_FlightData")
         self.fileDataBase = {}
         self.sources = {}
         self.timelines = {}
@@ -102,12 +100,12 @@ class DataManager:
 
     # DEPRECATED: legacy merge path; kept for compatibility.
     def merge_CSVtodf(self, files) -> pd.DataFrame | None:
-        """여러 CSV 파일을 하나의 DataFrame으로 병합해서 리턴"""
+        """Merge multiple CSV files into a single DataFrame."""
         df_list = []
         for file_name in files:
             try:
                 df = pd.read_csv(file_name)
-                df = self._convert(df)  # 기존 변환 함수 적용
+                df = self._convert(df)  # Apply the standard coordinate conversion.
                 df_list.append(df)
             except Exception as e:
                 logger.error(f"Error loading {file_name}: {e}")
@@ -116,13 +114,13 @@ class DataManager:
             logger.warning("No CSV files merged.")
             return None
 
-        # ignore_index=True로 새 인덱스 생성
+        # Rebuild the row index after concatenation.
         merged_df = pd.concat(df_list, ignore_index=True)
         return merged_df
 
     def _convert(self, df):
         df["record_id"] = range(len(df))
-        # 중앙값 기반으로 존/반구 결정(노이즈에 덜 민감)
+        # Infer the target UTM zone from the median lat/lon values.
         try:
             lat_med = float(pd.to_numeric(df["Latitude"], errors="coerce").median())
             lon_med = float(pd.to_numeric(df["Longitude"], errors="coerce").median())
@@ -131,11 +129,11 @@ class DataManager:
             epsg_code = self._latlon_to_utm_epsg(lat_med, lon_med)
         except Exception as e:
             logger.error(f"Failed to infer UTM EPSG from lat/lon: {e}")
-            # 기본값(한국 대부분 52N)으로 폴백하거나, 변환 생략 가능
+            # Fall back to EPSG:32652 when inference is not possible.
             epsg_code = 32652
             logger.warning(f"Fallback to EPSG:{epsg_code}")
 
-        # GeoDataFrame 변환
+        # Convert WGS84 coordinates into the inferred UTM CRS.
         try:
             gdf = gpd.GeoDataFrame(
                 df.copy(),
@@ -145,8 +143,7 @@ class DataManager:
 
             df["X"] = gdf.geometry.x
             df["Y"] = gdf.geometry.y
-            df["CRS_EPSG"] = epsg_code  # (선택) 현재 좌표계 기록
-            logger.debug(f"Lat/Lon → UTM(EPSG:{epsg_code}) 변환 완료.")
+            df["CRS_EPSG"] = epsg_code  # Keep the active projected CRS in the table.
         except Exception as e:
             logger.error(f"Error converting lat/lon to UTM: {e}")
 
@@ -155,10 +152,10 @@ class DataManager:
     @staticmethod
     def _latlon_to_utm_epsg(lat: float, lon: float) -> int:
         """
-        주어진 위도/경도로 UTM EPSG 코드를 반환.
-        북반구: 326xx, 남반구: 327xx
+        Return the UTM EPSG code for the given latitude/longitude.
+        Northern hemisphere uses 326xx, southern hemisphere uses 327xx.
         """
-        # 경도 -180~180 범위를 벗어나면 정규화
+        # Normalize longitude into the valid [-180, 180] range.
         if lon < -180 or lon > 180:
             lon = ((lon + 180) % 360) - 180
         zone = int((lon + 180) / 6) + 1
@@ -178,25 +175,22 @@ class DataManager:
         return df["X"], df["Y"], df["Mag"]
 
     def get_filtered_data(self, df, settings, degree):
-        logger.debug(settings)
         try:
 
             if settings.get("show_area_bound", False):
                 df = self.boundary_rejection(df, config.get("bound_area_points"))
             if df.empty:
-                logger.warning("Filtered DataFrame is empty.")
                 return None
 
             if settings["direction_filter"].get("enabled", False):
                 df = self.filter_cardinal_directions(
                     df, settings["direction_filter"].get("threshold", 5), degree=degree
                 )
-                # 구간별 시작-끝 각도도 동일 허용 범위 내인지 확인 후 제외
+                # Drop intervals whose end-to-end direction no longer matches the target azimuth.
                 df = self.filter_intervals_by_endpoint_angle(
                     df, settings["direction_filter"].get("threshold", 5), degree=degree
                 )
             if df.empty:
-                logger.warning("Filtered DataFrame is empty.")
                 return None
 
             if settings["continuity_filter"].get("enabled", False):
@@ -205,7 +199,6 @@ class DataManager:
                     df, settings["continuity_filter"]["num_points"]
                 )
             if df.empty:
-                logger.warning("Filtered DataFrame is empty.")
                 return None
 
             if settings["speed_filter"].get("enabled", False):
@@ -214,14 +207,12 @@ class DataManager:
                     df, sp["target_speed"], sp["tolerance"]
                 )
             if df.empty:
-                logger.warning("Filtered DataFrame is empty.")
                 return None
 
         except Exception as e:
-            logger.error(f"Error in get_filtered_data: {e}")
+            logger.exception("Error while applying flight data filters")
 
         if df.empty:
-            logger.warning("Filtered DataFrame is empty.")
             return None
 
         return df
@@ -304,10 +295,6 @@ class DataManager:
         self.clear_segments_for_timeline(timeline_id)
         return timeline
 
-    # Example usage:
-    #   self.create_timeline("tl0", ["file_a", "file_b"])
-    #   self.create_segment_from_range("seg0", "tl0", 100, 200, meta={"label": "A"})
-    #   x, y, c = self.get_scatter_arrays("seg0", "X", "Y", "Mag", stride=5)
     def create_timeline(self, timeline_id: str, source_ids: list[str]) -> Timeline:
         timeline = Timeline(timeline_id=timeline_id, source_ids=list(source_ids))
         timeline.build_offsets(self.sources)
@@ -509,28 +496,27 @@ class DataManager:
         prefix: str = "line",
     ) -> list[str]:
         """
-        record_id 기준으로 연속된 값들을 그룹으로 묶고,
-        각 그룹을 CSV 파일로 저장합니다 (길이에 관계없이 모두 저장).
+        Group continuous `record_id` ranges and save each group as a CSV file.
 
         Parameters
         ----------
         df : pd.DataFrame
-            반드시 'record_id' 컬럼을 포함해야 함.
+            Must contain a `record_id` column.
         output_dir : str
-            저장할 디렉토리 경로
+            Output directory path.
         prefix : str
-            저장 파일 접두어 (예: group → group_000.csv)
+            Output file prefix, for example `group_000.csv`.
 
         Returns
         -------
         list of str
-            저장된 파일 경로 리스트
+            Saved file paths.
         """
         df = getattr(self, "combined_df", pd.DataFrame())
         if df is None or df.empty or "record_id" not in df.columns:
             return []
 
-        # 현재 순서 보존. 단, 안전을 위해 record_id를 숫자로 보장
+        # Preserve the current row order and ensure `record_id` is numeric.
         work = df.copy()
         # work["record_id"] = pd.to_numeric(work["record_id"], errors="coerce")
 
@@ -544,11 +530,14 @@ class DataManager:
             fpath = outdir / f"{prefix}_{idx}.csv"
             try:
                 g.to_csv(fpath, index=False)
-                logger.debug(f"Saved group #{idx} → {fpath}")
                 saved_files.append(str(fpath))
             except Exception as e:
                 logger.error(f"Failed to save group #{idx} to {fpath}: {e}")
 
+        if saved_files:
+            logger.info(
+                f"Saved {len(saved_files)} continuous record group file(s) to {outdir}"
+            )
         return saved_files
 
     def merge_and_save_scanlines_by_direction(
@@ -672,13 +661,16 @@ class DataManager:
                 fpath = outdir / f"{prefix}_{idx:0{width}d}.csv"
                 try:
                     g.to_csv(fpath, index=False)
-                    logger.debug(f"Saved group #{idx} -> {fpath}")
                     saved_files.append(str(fpath))
                 except Exception as e:
                     logger.error(
                         f"Failed to save group #{len(saved_files) + 1} to {fpath}: {e}"
                     )
 
+            if saved_files:
+                logger.info(
+                    f"Saved {len(saved_files)} scanline group file(s) to {outdir}"
+                )
             return saved_files
 
         df = getattr(self, "combined_df", pd.DataFrame())
@@ -688,7 +680,7 @@ class DataManager:
         work = df.copy()
         work["record_id"] = pd.to_numeric(work["record_id"], errors="coerce")
 
-        # 1) 연속 구간 라벨링 (현재 순서 유지)
+        # 1) Label continuous `record_id` groups while preserving the current order.
         grp_labels = work["record_id"].diff().ne(1).cumsum()
         groups = []
         for gid, g in work.groupby(grp_labels, sort=False):
@@ -697,7 +689,7 @@ class DataManager:
                 continue
             dx = float(g["X"].iloc[-1]) - float(g["X"].iloc[0])
             dy = float(g["Y"].iloc[-1]) - float(g["Y"].iloc[0])
-            angle = (np.degrees(np.arctan2(dx, dy)) + 360.0) % 360.0  # 북 기준
+            angle = (np.degrees(np.arctan2(dx, dy)) + 360.0) % 360.0  # Bearing
             groups.append(
                 {
                     "gid": gid,
@@ -735,167 +727,13 @@ class DataManager:
             fpath = outdir / f"{prefix}_{idx:0{width}d}.csv"
             try:
                 g.to_csv(fpath, index=False)
-                logger.debug(f"Saved group #{idx} -> {fpath}")
                 saved_files.append(str(fpath))
             except Exception as e:
                 logger.error(f"Failed to save group #{idx} to {fpath}: {e}")
 
+        if saved_files:
+            logger.info(f"Saved {len(saved_files)} scanline group file(s) to {outdir}")
         return saved_files
-
-        # Merge-by-direction code kept for reference (disabled).
-        """
-
-        # 2) 길이 내림차순(긴 것 먼저)
-        groups.sort(key=lambda it: it["n"], reverse=True)
-
-        outdir = Path(output_dir)
-        outdir.mkdir(parents=True, exist_ok=True)
-
-        def ang_diff(a, b):
-            d = abs(a - b) % 360.0
-            return min(d, 360.0 - d)
-
-        def dist(p, q):
-            return float(np.hypot(p[0] - q[0], p[1] - q[1]))
-
-        saved_files = []
-        used = set()
-        merged_count = 0
-
-        for seed in groups:
-            if seed["gid"] in used:
-                continue
-
-            # 새 라인 시작
-            current_angle = seed["angle"]
-            current_start = seed["start"]
-            current_end = seed["end"]
-            merged_parts = [seed["df"]]
-            used.add(seed["gid"])
-
-            # 길이가 긴 순으로 가능한 한 많이 붙이기
-            progress = True
-            while progress:
-                progress = False
-                for cand in groups:
-                    if cand["gid"] in used:
-                        continue
-                    # 방향 유사 체크
-                    if ang_diff(current_angle, cand["angle"]) > angle_tol_deg:
-                        continue
-
-                    # --- (1) tail-append: current_end -> cand.start ---
-                    if dist(current_end, cand["start"]) <= join_gap_max:
-                        merged_parts.append(cand["df"])  # 뒤에 붙이기
-                        used.add(cand["gid"])
-                        current_end = cand["end"]  # 끝점 갱신
-                        progress = True
-                        break  # 다시 후보 검색
-
-                    # --- (2) head-prepend: cand.end -> current_start ---
-                    if dist(current_start, cand["end"]) <= join_gap_max:
-                        merged_parts.insert(0, cand["df"])  # 앞에 붙이기
-                        used.add(cand["gid"])
-                        current_start = cand["start"]  # 시작점 갱신
-                        progress = True
-                        break  # 다시 후보 검색
-            # 3) 저장 전 record_id 정렬
-            merged = pd.concat(merged_parts, ignore_index=True)
-            # if "record_id" in merged.columns:
-            #     merged = merged.sort_values("record_id").reset_index(drop=True)
-            try:
-                sx, sy = float(merged["X"].iloc[0]), float(merged["Y"].iloc[0])
-                ex, ey = float(merged["X"].iloc[-1]), float(merged["Y"].iloc[-1])
-                end_to_end = float(np.hypot(ex - sx, ey - sy))
-            except Exception:
-                end_to_end = float("inf")  # 좌표 문제 있으면 일단 저장하도록
-
-            if end_to_end <= exclude_endpoints_within:
-                logger.debug(
-                    f"Skip merged line (endpoints {end_to_end:.2f} m <= {exclude_endpoints_within} m)."
-                )
-                continue  # 저장하지 않고 건너뜀
-
-            merged_count += 1
-            fpath = outdir / f"{prefix}_{merged_count}.csv"
-            try:
-                merged.to_csv(fpath, index=False)
-                logger.debug(f"Saved merged line #{merged_count} → {fpath}")
-                saved_files.append(str(fpath))
-            except Exception as e:
-                logger.error(
-                    f"Failed to save merged line #{merged_count} to {fpath}: {e}"
-                )
-
-        return saved_files
-
-        """
-
-    # def filter_straight_segments(
-    #     self, df: pd.DataFrame, angle_change_threshold_deg: float = 1.0
-    # ) -> pd.DataFrame:
-    #     """
-    #     방향 변화량(각도 변화)이 angle_change_threshold_deg 이하인 연속 구간만 유지
-    #     → 직선 구간만 유지하고 회전 구간 제거
-    #     """
-    #     if "X" not in df.columns or "Y" not in df.columns:
-    #         raise ValueError("DataFrame must contain 'X' and 'Y' columns.")
-
-    #     # 1. 이동 방향 계산 (북 기준, 시계방향)
-    #     dx = df["X"].diff()
-    #     dy = df["Y"].diff()
-    #     directions = (np.degrees(np.arctan2(dx, dy)) + 360) % 360
-
-    #     # 2. 방향 변화량 계산 (Δθ, angle difference)
-    #     delta_angle = directions.diff().abs()
-    #     delta_angle = delta_angle.map(
-    #         lambda x: 360 - x if x > 180 else x
-    #     )  # 최소각 계산
-
-    #     # 3. 기준 이하인 경우만 유지 (회전이 크지 않은 직선)
-    #     mask = delta_angle < angle_change_threshold_deg
-    #     mask.iloc[0:2] = False  # 첫 2개는 diff로 NaN/불확정 → 제외
-
-    #     return df[mask.fillna(False)].copy()
-
-    # def filter_cardinal_directions(
-    #     self,
-    #     df: pd.DataFrame,
-    #     tolerance_deg: float = 5.0,
-    #     step: int = 10,  # ← N개 뒤와 비교
-    # ) -> pd.DataFrame:
-    #     """
-    #     XY 변화 방향이 동/서/남/북 (0°, 90°, 180°, 270°) ± tolerance_deg 이내인 경우만 유지
-    #     방향은 현재 지점 → step개 뒤 지점 벡터 기준으로 계산.
-    #     """
-    #     if not {"X", "Y"}.issubset(df.columns):
-    #         raise ValueError("DataFrame must contain 'X' and 'Y' columns.")
-
-    #     # 현재 → step개 뒤 점으로 향하는 벡터
-    #     x_next = df["X"].shift(-step)
-    #     y_next = df["Y"].shift(-step)
-    #     dx = x_next - df["X"]
-    #     dy = y_next - df["Y"]
-
-    #     # 이동 방향(북 기준, 시계방향). 기존 코드 컨벤션 유지: arctan2(dx, dy)
-    #     directions = (np.degrees(np.arctan2(dx, dy)) + 360) % 360
-
-    #     # 기준 각도: 동서남북
-    #     targets = [0, 90, 180, 270]
-
-    #     # tolerance 이내 포함 여부 마스크
-    #     mask = pd.Series(False, index=df.index)
-    #     for target in targets:
-    #         lower = (target - tolerance_deg) % 360
-    #         upper = (target + tolerance_deg) % 360
-    #         if lower < upper:
-    #             mask |= (directions >= lower) & (directions <= upper)
-    #         else:
-    #             # 360도 래핑 구간
-    #             mask |= (directions >= lower) | (directions <= upper)
-
-    #     # step개 뒤가 없는 마지막 step개 행은 NaN → 자동 제외
-    #     return df.loc[mask.fillna(False)].copy()
 
     def filter_cardinal_directions(
         self, df: pd.DataFrame, tolerance_deg: float = 5.0, degree=0
@@ -909,15 +747,14 @@ class DataManager:
         dx = df["X"].diff()
         dy = df["Y"].diff()
 
-        # 이동 방향 계산 (북 기준, 시계방향)
+        # Compute movement direction (north-based, clockwise).
         directions = (np.degrees(np.arctan2(dx, dy)) + 360) % 360
-        directions.iloc[0] = np.nan  # 첫 행 제외
+        directions.iloc[0] = np.nan  # Exclude the first row.
 
-        # 기준 각도: 동서남북
+        # Reference angles: east, west, south, north.
         targets = [0 + degree, 90 + degree, 180 + degree, 270 + degree]
-        logger.debug(f"Directional Fileter reference target {targets}")
 
-        # tolerance 이내 포함 여부 마스크 계산
+        # Build the mask for angles that fall within the tolerance.
         mask = pd.Series(False, index=df.index)
         for target in targets:
             lower = (target - tolerance_deg) % 360
@@ -926,7 +763,7 @@ class DataManager:
             if lower < upper:
                 mask |= (directions >= lower) & (directions <= upper)
             else:
-                # 360도 범위 넘어가는 경우
+                # Handle wrapped ranges that cross 360 degrees.
                 mask |= (directions >= lower) | (directions <= upper)
 
         return df[mask.fillna(False)].copy()
@@ -1007,19 +844,19 @@ class DataManager:
         if not {"X", "Y", "Counter"}.issubset(df.columns):
             raise ValueError("DataFrame must contain 'X', 'Y', and 'Counter' columns.")
 
-        # 시간 차 (초 단위)
-        dt = df["Counter"].diff().fillna(1) / 1000.0  # ms → sec
+        # Time difference in seconds.
+        dt = df["Counter"].diff().fillna(1) / 1000.0  # ms -> sec
 
-        # 이동 거리 (유클리드 거리)
+        # Travel distance (Euclidean).
         dx = df["X"].diff()
         dy = df["Y"].diff()
         dist = np.sqrt(dx**2 + dy**2)
 
-        # 속도 계산 (m/s)
+        # Compute speed in m/s.
         speed = dist / dt.replace(0, np.nan)
-        speed.iloc[0] = np.nan  # 첫 행은 비교 불가
+        speed.iloc[0] = np.nan  # The first row cannot be compared.
 
-        # 속도 범위 조건
+        # Speed range filter.
         low, high = target_speed - tolerance, target_speed + tolerance
         mask = (speed >= low) & (speed <= high)
 
@@ -1046,14 +883,14 @@ class DataManager:
         if "record_id" not in df.columns:
             raise ValueError("DataFrame must contain 'record_id' column.")
 
-        # record_id 차분이 1이 아닐 때 블록 나눔
+        # Split blocks whenever the record_id difference is not 1.
         diff = df["record_id"].diff().fillna(1)
         block_id = (diff != 1).cumsum()
 
-        # 블록별 크기 계산
+        # Compute the size of each block.
         block_sizes = block_id.value_counts()
 
-        # 유효한 블록만 선택
+        # Select only valid blocks.
         valid_blocks = block_sizes[block_sizes >= min_length].index
         mask = block_id.isin(valid_blocks)
 
@@ -1072,10 +909,9 @@ class DataManager:
             logger.warning("Invalid or too few boundary points.")
             return df
 
-        # --- 폴리곤 닫혀있는지 확인하고 자동으로 닫기 ---
+        # --- Ensure the polygon is closed; close it automatically if needed. ---
         if bound_points[0] != bound_points[-1]:
             bound_points = bound_points + [bound_points[0]]
-            logger.debug("Boundary polygon was not closed. Automatically closed it.")
 
         try:
             poly = Polygon(bound_points)
@@ -1083,37 +919,35 @@ class DataManager:
                 logger.warning("Polygon is invalid.")
                 return df
 
-            # GeoDataFrame 생성 및 필터링
+            # Build a GeoDataFrame and apply the polygon filter.
             gdf = gpd.GeoDataFrame(
                 df.copy(),
                 geometry=gpd.points_from_xy(df["X"], df["Y"]),
                 crs="EPSG:3857",
             )
-            # inside_mask = gdf.geometry.within(poly)
             inside_mask = gdf.geometry.apply(poly.covers)
             filtered = gdf[inside_mask].drop(columns="geometry")
 
-            logger.debug(f"Boundary rejection: {len(df)} → {len(filtered)} rows")
             return filtered
 
         except Exception as e:
-            logger.error(f"Boundary rejection failed: {e}")
+            logger.exception("Boundary rejection failed")
             return df
 
     def filter_by_dist(self, df: pd.DataFrame, threshold: float = 1.0) -> pd.DataFrame:
         if not {"X", "Y"}.issubset(df.columns):
             raise ValueError("DataFrame must contain 'X' and 'Y' columns.")
 
-        # 이동 거리 (유클리드 거리)
+        # Travel distance (Euclidean).
         dx = df["X"].diff()
         dy = df["Y"].diff()
         dist = np.sqrt(dx**2 + dy**2)
 
-        # 첫 행은 비교 불가 → NaN 지정
+        # The first row cannot be compared, so mark it as NaN.
         dist.iloc[0] = np.nan
 
-        # threshold 이상만 유지
+        # Keep only rows at or above the threshold.
         mask = (dist >= threshold).fillna(False)
 
-        # df와 같은 인덱스를 유지한 채 필터링
+        # Filter while preserving the original dataframe index.
         return df.loc[mask].copy()

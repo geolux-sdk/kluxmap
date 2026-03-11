@@ -10,7 +10,7 @@ from PySide6.QtWidgets import QApplication, QSplashScreen
 
 from mainWindow import KLuxMap, resource_path
 
-TITLE = "KLuxMap V1.1.2"
+TITLE = "KLuxMap V2.0.1"
 APP_NAME = "KLuxMap"
 APP_DIR = Path.home() / f".{APP_NAME}"
 LOG_DIR = APP_DIR / "log"
@@ -35,8 +35,6 @@ def _setup_logging() -> None:
     debug_env = os.getenv("DEBUG", "").lower() in {"1", "true", "yes", "debug"}
     if debug_env:
         logger.add(sys.stderr, level="DEBUG")
-    else:
-        logger.debug("Console logger disabled (set DEBUG=1 to enable)")
 
     logger.info(f"loguru initialized. Log file: {file_path}")
 
@@ -73,12 +71,12 @@ def main():
     splash.setMask(splash_pix.mask())
     splash.show()
 
-    # try:
-    win = KLuxMap(title= TITLE)
-    win.show()
-    # except Exception as err:
-    #     logger.critical(repr(err))
-    #     sys.exit(1)
+    try:
+        win = KLuxMap(title=TITLE)
+        win.show()
+    except Exception as err:
+        logger.critical(repr(err))
+        sys.exit(1)
 
     splash.finish(win)
     sys.exit(app.exec())
