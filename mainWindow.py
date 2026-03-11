@@ -30,7 +30,7 @@ from myConvertDlg import (
     ConvertDataDialog,
     convert_with_progress,
 )
-from myResource import load_SEC_file, make_project_subfolder, resource_path
+from myResource import load_sec_file, make_project_subfolder, resource_path
 from mySettings import config
 from myWidgets import (
     ConfigDataSettingsDialog,
@@ -52,10 +52,10 @@ class KLuxMap(QMainWindow):
         self.settings = QSettings("Geolux", "KLuxMap")
         logger.info("Program start")
         self.db = DataManager()
-        self.initUI()
+        self._init_ui()
         self._restore_window()
 
-    def initUI(self):
+    def _init_ui(self):
         self.setWindowTitle(self.title)
         self.setWindowIcon(QIcon(resource_path(VIEWER_ICON)))
         self.setWindowFlags(
@@ -63,13 +63,17 @@ class KLuxMap(QMainWindow):
             | Qt.WindowMaximizeButtonHint
             | Qt.WindowCloseButtonHint
         )
-        self.createMenuBar()
+        self._create_menu_bar()
+        self._setup_tabs()
+        self._connect_signals()
 
+    def _setup_tabs(self):
         self.tabs = QTabWidget(self)
 
         self.calibrationFlightWidget = CalibrationFlightWidget(self.db)
         self.linePlotWidget = LinePlotWidget(self.db, self)
         self.flightPlotWidget = FlightPlotWidget(self.db, self)
+
         self.tabs.addTab(self.calibrationFlightWidget, "Calibration Flight")
         self.tabs.addTab(self.flightPlotWidget, "DRONE DATA")
         self.tabs.addTab(self.linePlotWidget, "SCAN LINE DATA")
@@ -77,8 +81,6 @@ class KLuxMap(QMainWindow):
         self._previous_tab_index = self.tabs.currentIndex()
 
         self.setCentralWidget(self.tabs)
-
-        self.connectSignals()
 
     def on_tab_changed(self, index):
         if index == 2:
@@ -105,7 +107,7 @@ class KLuxMap(QMainWindow):
         else:
             event.ignore()
 
-    def createMenuBar(self):
+    def _create_menu_bar(self):
         menu_bar = self.menuBar()
 
         project_menu = menu_bar.addMenu("&Project")
@@ -177,23 +179,23 @@ class KLuxMap(QMainWindow):
         self.config_action.setEnabled(False)
         self._update_recent_project_action()
 
-    def connectSignals(self):
+    def _connect_signals(self):
         """모든 시그널을 슬롯에 연결"""
         self.tabs.currentChanged.connect(self.on_tab_changed)
-        self.createProject_action.triggered.connect(self.createProjectFolder)
-        self.openProject_action.triggered.connect(self.openProjectFolder)
-        self.recentProject_action.triggered.connect(self.openRecentProject)
-        self.resetProject_action.triggered.connect(self.resetProjectFolder)
-        self.closeProject_action.triggered.connect(self.closeProjectFolder)
-        self.convert_action.triggered.connect(self.convertDataToCSV)
-        self.import_SEC_files_action.triggered.connect(self.import_SEC_files)
+        self.createProject_action.triggered.connect(self._create_project_folder)
+        self.openProject_action.triggered.connect(self._open_project_folder)
+        self.recentProject_action.triggered.connect(self._open_recent_project)
+        self.resetProject_action.triggered.connect(self._reset_project_folder)
+        self.closeProject_action.triggered.connect(self._close_project_folder)
+        self.convert_action.triggered.connect(self._convert_data_to_csv)
+        self.import_SEC_files_action.triggered.connect(self._import_sec_files)
         self.exit_action.triggered.connect(self.close)
         self.config_action.triggered.connect(
             lambda checked=False: ConfigDataSettingsDialog(self).exec()
         )
-        self.maps_api_key_action.triggered.connect(self.editGoogleMapsApiKey)
-        self.settings_action.triggered.connect(self.showProjectSettingsDialog)
-        self.about_action.triggered.connect(self.showAboutDialog)
+        self.maps_api_key_action.triggered.connect(self._edit_google_maps_api_key)
+        self.settings_action.triggered.connect(self._show_project_settings_dialog)
+        self.about_action.triggered.connect(self._show_about_dialog)
 
         for w in (
             self.flightPlotWidget,
@@ -203,14 +205,14 @@ class KLuxMap(QMainWindow):
             self.projectOpened.connect(w.on_project_opened)
             self.projectReset.connect(w.on_project_reset)
 
-    def showAboutDialog(self):
+    def _show_about_dialog(self):
         QMessageBox.about(
             self,
             "About",
             "This is the KLuxMap application \nfor magnetic data viewing, \ndeveloped by KIGAM and GEOLUX.",
         )
 
-    def editGoogleMapsApiKey(self):
+    def _edit_google_maps_api_key(self):
         dlg = QDialog(self)
         dlg.setWindowTitle("Google Maps API Key")
         dlg.resize(480, 140)
@@ -255,7 +257,7 @@ class KLuxMap(QMainWindow):
                 self.settings.remove("google_maps_api_key")
             self.settings.sync()
 
-    def showProjectSettingsDialog(self):
+    def _show_project_settings_dialog(self):
         settings_path = config.file_path
         if not settings_path:
             QMessageBox.information(self, "Settings", "No project is open.")
@@ -342,16 +344,16 @@ class KLuxMap(QMainWindow):
         enabled = bool(last_folder) and Path(last_folder).exists()
         self.recentProject_action.setEnabled(enabled)
 
-    def menu_action_enable(self, action=True):
+    def _set_menu_actions_enabled(self, action=True):
         self.closeProject_action.setEnabled(action)
         self.resetProject_action.setEnabled(action)
         self.convert_action.setEnabled(action)
         self.import_SEC_files_action.setEnabled(action)
         self.config_action.setEnabled(action)
 
-        self.flightPlotWidget.actionEnable(action)
-        self.linePlotWidget.actionEnable(action)
-        self.calibrationFlightWidget.actionEnable(action)
+        self.flightPlotWidget.set_actions_enabled(action)
+        self.linePlotWidget.set_actions_enabled(action)
+        self.calibrationFlightWidget.set_actions_enabled(action)
         can_open = not action
         self.createProject_action.setEnabled(can_open)
         self.openProject_action.setEnabled(can_open)
@@ -360,14 +362,14 @@ class KLuxMap(QMainWindow):
         else:
             self.recentProject_action.setEnabled(False)
 
-    def closeProjectFolder(self):
+    def _close_project_folder(self):
         project_path = config.get("project_path", "")
         if project_path:
             logger.info(f"Project closed: {project_path}")
-        self.menu_action_enable(False)
+        self._set_menu_actions_enabled(False)
         self.projectReset.emit()
 
-    def createProjectFolder(self):
+    def _create_project_folder(self):
         dlg = CreateProjectDialog(parent=self)
         if not dlg.exec():
             return
@@ -391,13 +393,13 @@ class KLuxMap(QMainWindow):
 
         self.openProject_action.setEnabled(False)
         self.createProject_action.setEnabled(False)
-        self.menu_action_enable(True)
+        self._set_menu_actions_enabled(True)
         self.projectOpened.emit(folder_path)
         self.settings.setValue("projects/last", str(folder_path))
         self._update_recent_project_action()
         logger.info(f"Project created: {folder_path}")
 
-    def openProjectFolder(self):
+    def _open_project_folder(self):
         last_folder = self.settings.value("projects/last", "", type=str)
         default_path = Path(last_folder) if last_folder else Path.home()
         if not default_path.exists():
@@ -408,7 +410,7 @@ class KLuxMap(QMainWindow):
         if folder_path:
             self._open_project(folder_path)
 
-    def openRecentProject(self):
+    def _open_recent_project(self):
         last_folder = self.settings.value("projects/last", "", type=str)
         if not last_folder:
             QMessageBox.information(
@@ -440,14 +442,14 @@ class KLuxMap(QMainWindow):
 
         self.openProject_action.setEnabled(False)
         self.createProject_action.setEnabled(False)
-        self.menu_action_enable()
+        self._set_menu_actions_enabled()
 
         self.projectOpened.emit(str(folder_path))
         self.settings.setValue("projects/last", str(folder_path))
         self._update_recent_project_action()
         logger.info(f"Project opened: {folder_path}")
 
-    def resetProjectFolder(self):
+    def _reset_project_folder(self):
         project_path = Path(config.get("project_path", ""))
         if not project_path or not project_path.exists():
             return
@@ -496,7 +498,7 @@ class KLuxMap(QMainWindow):
                     QMessageBox.Ok,
                 )
 
-    def convertDataToCSV(self):
+    def _convert_data_to_csv(self):
         dlg = ConvertDataDialog(parent=self)
         if not dlg.exec():
             return
@@ -589,7 +591,7 @@ class KLuxMap(QMainWindow):
             )
         return files, folder
 
-    def import_SEC_files(self):
+    def _import_sec_files(self):
         imported_path = make_project_subfolder("Diurnal Data Folder")
         if not imported_path:
             return
@@ -608,7 +610,7 @@ class KLuxMap(QMainWindow):
             return
         imported_count = 0
         for file_path in files:
-            out_file = load_SEC_file(file_path, imported_path)
+            out_file = load_sec_file(file_path, imported_path)
             if out_file:
                 imported_count += 1
         logger.info(

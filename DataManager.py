@@ -75,7 +75,7 @@ class DataManager:
         self.scanline_intervals_by_file: dict[str, list[tuple[int, int]]] = {}
         self.scanline_cross_groups: list[list[tuple[str, list[tuple[int, int]]]]] = []
 
-    def clear_FlightData(self):
+    def clear_flight_data(self):
         self.fileDataBase = {}
         self.sources = {}
         self.timelines = {}
@@ -87,7 +87,7 @@ class DataManager:
         self.scanline_intervals_by_file = {}
         self.scanline_cross_groups = []
 
-    def load_FlightData(self, file_name):
+    def load_flight_data(self, file_name):
         basename = Path(file_name).stem
         try:
             df = self._convert(pd.read_csv(file_name))
@@ -99,7 +99,7 @@ class DataManager:
             logger.error(f"Error loading {file_name}: {e}")
 
     # DEPRECATED: legacy merge path; kept for compatibility.
-    def merge_CSVtodf(self, files) -> pd.DataFrame | None:
+    def merge_csv_to_df(self, files) -> pd.DataFrame | None:
         """Merge multiple CSV files into a single DataFrame."""
         df_list = []
         for file_name in files:
@@ -165,13 +165,13 @@ class DataManager:
             zone = 60
         return (32600 if lat >= 0 else 32700) + zone
 
-    def get_FlightData(self, file_name):
+    def get_flight_data(self, file_name):
         src = self.sources.get(file_name)
         if src is not None:
             return src.df
         return self.fileDataBase.get(file_name)
 
-    def get_XYMagData(self, df):
+    def get_xy_mag_data(self, df):
         return df["X"], df["Y"], df["Mag"]
 
     def get_filtered_data(self, df, settings, degree):

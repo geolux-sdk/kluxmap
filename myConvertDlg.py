@@ -15,7 +15,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
-from Data_Parse import DataConverter, importMagArrowFile
+from Data_Parse import DataConverter, import_mag_arrow_file
 from mySettings import config
 
 
@@ -620,7 +620,9 @@ class Converter(QThread):
                 status = f"Converting: {os.path.basename(fpath)} ({i}/{n})"
                 self.text.emit(status)
                 if device == "Mag Arrow":
-                    importMagArrowFile(fpath, self.saved_folder_path, self.selection)
+                    import_mag_arrow_file(
+                        fpath, self.saved_folder_path, self.selection
+                    )
                 else:
                     basename = os.path.basename(fpath)
                     name_only, ext = os.path.splitext(basename)

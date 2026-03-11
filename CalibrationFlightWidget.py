@@ -49,10 +49,10 @@ class CalibrationFlightWidget(QWidget):
         self._selected_files = []
         self._temp_line = None
         self._palette = plt.get_cmap("tab10").colors
-        self.initUI()
+        self._init_ui()
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
 
-    def initUI(self):
+    def _init_ui(self):
         layout = QVBoxLayout()
 
         # Toolbar
@@ -64,7 +64,9 @@ class CalibrationFlightWidget(QWidget):
             self,
         )
         self.actionOpenCaliFolder.setStatusTip("Open Calibration Flight Folder")
-        self.actionOpenCaliFolder.triggered.connect(self.openCalibrationFlightFolder)
+        self.actionOpenCaliFolder.triggered.connect(
+            self._open_calibration_flight_folder
+        )
         toolbar.addAction(self.actionOpenCaliFolder)
 
         layout.addWidget(toolbar)
@@ -76,16 +78,16 @@ class CalibrationFlightWidget(QWidget):
         # Scatter + controls
         data_layout = QHBoxLayout()
         data_layout.addWidget(
-            self.createScatterPlot(), 0, Qt.AlignmentFlag.AlignHCenter
+            self._create_scatter_plot(), 0, Qt.AlignmentFlag.AlignHCenter
         )
         data_layout.addWidget(
-            self.createDataWidgets(), 0, Qt.AlignmentFlag.AlignHCenter
+            self._create_data_widgets(), 0, Qt.AlignmentFlag.AlignHCenter
         )
 
         dataV_layout = QVBoxLayout()
         dataV_layout.addLayout(data_layout)
         dataV_layout.addWidget(
-            self.createCanvasPlot(), 0, Qt.AlignmentFlag.AlignHCenter
+            self._create_canvas_plot(), 0, Qt.AlignmentFlag.AlignHCenter
         )
 
         panel = QFrame()
@@ -93,7 +95,7 @@ class CalibrationFlightWidget(QWidget):
         panel.setFrameShape(QFrame.Shape.StyledPanel)
         panel.setLineWidth(2)
 
-        self.file_list_widget = self.createFileListWidget()
+        self.file_list_widget = self._create_file_list_widget()
         main_layout.addWidget(self.file_list_widget, 0)
         main_layout.addWidget(panel)
         main_layout.setStretch(0, 0)
@@ -103,10 +105,10 @@ class CalibrationFlightWidget(QWidget):
 
         self.actionOpenCaliFolder.setEnabled(False)
 
-    def actionEnable(self, action=True):
+    def set_actions_enabled(self, action=True):
         self.actionOpenCaliFolder.setEnabled(action)
 
-    def openCalibrationFlightFolder(self):
+    def _open_calibration_flight_folder(self):
         project_path = config.get("project_path", "")
         if not project_path:
             QMessageBox.warning(self, "ERROR", "Open a project folder first.")
@@ -133,11 +135,11 @@ class CalibrationFlightWidget(QWidget):
         logger.info(
             f"Loaded {len(files)} calibration flight file(s) from {path}"
         )
-        self.updateFileList(files)
-        self.df = self.db.merge_CSVtodf(files)
+        self.update_file_list(files)
+        self.df = self.db.merge_csv_to_df(files)
         self.update_plots(self.df)
 
-    def createScatterPlot(self):
+    def _create_scatter_plot(self):
         # Slightly enlarge the mag scatter plot (~additional 10% bigger than before)
         self.scatter_fig = Figure(figsize=(7.3, 2.4), dpi=100)
         self.scatter_ax = self.scatter_fig.add_subplot(111)
@@ -153,7 +155,7 @@ class CalibrationFlightWidget(QWidget):
         self.scatter_canvas.mpl_connect("scroll_event", self._on_scroll_zoom)
         return self.scatter_canvas
 
-    def createCanvasPlot(self):
+    def _create_canvas_plot(self):
         # Make the figure a bit wider so both plots can fill the space
         self.fig = Figure(figsize=(13.2, 8), dpi=100)
 
@@ -172,7 +174,7 @@ class CalibrationFlightWidget(QWidget):
         self.canvas.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         return self.canvas
 
-    def createDataWidgets(self):
+    def _create_data_widgets(self):
         box = QGroupBox("Directional Calibration Data")
 
         # Use a vertical layout on the group box.
@@ -180,11 +182,11 @@ class CalibrationFlightWidget(QWidget):
 
         # Apply button
         apply_btn = QPushButton("Apply")
-        apply_btn.clicked.connect(self.applyCalibrationFlightData)
+        apply_btn.clicked.connect(self._apply_calibration_flight_data)
         vbox.addWidget(apply_btn, alignment=Qt.AlignmentFlag.AlignLeft)
         # Cancel button
         cancel_btn = QPushButton("Cancel")
-        cancel_btn.clicked.connect(self.cancelCalibrationFlightData)
+        cancel_btn.clicked.connect(self._cancel_calibration_flight_data)
         vbox.addWidget(cancel_btn, alignment=Qt.AlignmentFlag.AlignLeft)
 
         # Grid of calibration inputs
@@ -240,29 +242,31 @@ class CalibrationFlightWidget(QWidget):
         vbox.addStretch()
         # Save button
         save_btn = QPushButton("Save")
-        save_btn.clicked.connect(self.saveCalibrationFlightData)
+        save_btn.clicked.connect(self._save_calibration_flight_data)
         vbox.addWidget(save_btn, alignment=Qt.AlignmentFlag.AlignRight)
 
         return box
 
-    def createFileListWidget(self):
+    def _create_file_list_widget(self):
         box = QGroupBox("Selected Files")
         layout = QVBoxLayout(box)
         self.file_list = QListWidget()
         self.file_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-        self.file_list.customContextMenuRequested.connect(self._showFileContextMenu)
+        self.file_list.customContextMenuRequested.connect(
+            self._show_file_context_menu
+        )
         layout.addWidget(self.file_list)
         box.setMinimumWidth(220)
         box.setFixedWidth(240)
         box.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Expanding)
         return box
 
-    def updateFileList(self, files):
+    def update_file_list(self, files):
         """Show selected calibration files on the left list."""
         self.file_list.clear()
         self.file_list.addItems([os.path.basename(path) for path in files])
 
-    def _showFileContextMenu(self, pos):
+    def _show_file_context_menu(self, pos):
         item = self.file_list.itemAt(pos)
         if not item:
             return
@@ -272,9 +276,9 @@ class CalibrationFlightWidget(QWidget):
         chosen = menu.exec(self.file_list.mapToGlobal(pos))
         if chosen == remove_action:
             row = self.file_list.row(item)
-            self._confirmAndRemoveFile(row)
+            self._confirm_and_remove_file(row)
 
-    def _confirmAndRemoveFile(self, row):
+    def _confirm_and_remove_file(self, row):
         """Confirm and remove a file from the selection and data."""
         if row < 0 or row >= len(self._selected_files):
             return
@@ -290,15 +294,15 @@ class CalibrationFlightWidget(QWidget):
             return
 
         self._selected_files.pop(row)
-        self.updateFileList(self._selected_files)
+        self.update_file_list(self._selected_files)
 
         if self._selected_files:
-            self.df = self.db.merge_CSVtodf(self._selected_files)
+            self.df = self.db.merge_csv_to_df(self._selected_files)
         else:
             self.df = pd.DataFrame()
         self.update_plots(self.df)
 
-    def cancelCalibrationFlightData(self):
+    def _cancel_calibration_flight_data(self):
         self._selected_lines.clear()
         self._sel_positions.clear()
         self.TD_input.setText("")
@@ -311,9 +315,9 @@ class CalibrationFlightWidget(QWidget):
         self._set_input_color(self.RL_input, None)
         self.update_plots(self.df)
 
-    def applyCalibrationFlightData(self):
+    def _apply_calibration_flight_data(self):
         if not self._selected_lines:
-            logger.warning("applyCalibrationFlightData: No lines selected.")
+            logger.warning("_apply_calibration_flight_data: No lines selected.")
             QMessageBox.warning(
                 self,
                 "No Selection",
@@ -377,7 +381,7 @@ class CalibrationFlightWidget(QWidget):
         self._sel_positions.clear()
         self.update_plots(self.df)
 
-    def saveCalibrationFlightData(self):
+    def _save_calibration_flight_data(self):
         project_path = config.get("project_path")
         if not project_path:
             QMessageBox.warning(
@@ -707,7 +711,7 @@ class CalibrationFlightWidget(QWidget):
         self.cb_vertical_main.setChecked(True)
         self.cb_horizontal_main.setChecked(False)
         self._selected_files.clear()
-        self.updateFileList(self._selected_files)
+        self.update_file_list(self._selected_files)
         self.df = pd.DataFrame()
 
         # Clear all plots
@@ -774,7 +778,7 @@ class CalibrationFlightWidget(QWidget):
                 self.cb_vertical_main.setChecked(True)
                 self.cb_horizontal_main.setChecked(False)
         
-        self.updateFileList(self._selected_files)
+        self.update_file_list(self._selected_files)
         if self._selected_files:
-            self.df = self.db.merge_CSVtodf(self._selected_files)
+            self.df = self.db.merge_csv_to_df(self._selected_files)
             self.update_plots(self.df)

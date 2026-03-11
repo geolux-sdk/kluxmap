@@ -113,9 +113,9 @@ class FlightPlotWidget(QWidget):
         self._line_plot_state_hash = None
         self._line_base_state_hash = None
 
-        self.initUI()
+        self._init_ui()
 
-    def initUI(self):
+    def _init_ui(self):
         layout = QVBoxLayout()
         # Toolbar
         toolbar = QToolBar(self)
@@ -162,13 +162,13 @@ class FlightPlotWidget(QWidget):
         # Main layout
         vbox_layout = QVBoxLayout()
         vbox_layout.addWidget(
-            self.createFileList(), alignment=Qt.AlignmentFlag.AlignLeft
+            self._create_file_list(), alignment=Qt.AlignmentFlag.AlignLeft
         )
         vbox_layout.addWidget(
-            self.createMapTypeSelector(), alignment=Qt.AlignmentFlag.AlignLeft
+            self._create_map_type_selector(), alignment=Qt.AlignmentFlag.AlignLeft
         )
         vbox_layout.addWidget(
-            self.createLogoLabel(), alignment=Qt.AlignmentFlag.AlignHCenter
+            self._create_logo_label(), alignment=Qt.AlignmentFlag.AlignHCenter
         )
 
         ctrl_panel = QFrame()
@@ -177,7 +177,7 @@ class FlightPlotWidget(QWidget):
         ctrl_panel.setMaximumWidth(300)
 
         canvas_layout = QHBoxLayout()
-        canvas_layout.addWidget(self.createPlotTabs(), 1)
+        canvas_layout.addWidget(self._create_plot_tabs(), 1)
 
         main_layout = QHBoxLayout()
         main_layout.setContentsMargins(1, 1, 1, 1)
@@ -196,22 +196,22 @@ class FlightPlotWidget(QWidget):
         self.actionDataJoinDisp.setEnabled(False)
         self.actionDataOut.setEnabled(False)
 
-        self.connectSignals()
+        self._connect_signals()
         self._line_undo_shortcut = QShortcut(QKeySequence("Ctrl+Z"), self)
         self._line_undo_shortcut.activated.connect(self._undo_line_edit)
         self._line_redo_shortcut = QShortcut(QKeySequence("Ctrl+Y"), self)
         self._line_redo_shortcut.activated.connect(self._redo_line_edit)
 
-    def connectSignals(self):
-        self.actionOpenFileBrowser.triggered.connect(self.openFileBrowser)
+    def _connect_signals(self):
+        self.actionOpenFileBrowser.triggered.connect(self._open_file_browser)
         self.actionDataConfig.triggered.connect(
             lambda checked=False: DataSettingsDialog(parent=self).exec()
         )
         self.actionDataCutDisp.toggled.connect(self._on_linecut_toggled)
         self.actionDataJoinDisp.toggled.connect(self._on_lineappend_toggled)
-        self.actionDataOut.triggered.connect(self.exportKML)
+        self.actionDataOut.triggered.connect(self.export_kml)
 
-    def actionEnable(self, action=True):
+    def set_actions_enabled(self, action=True):
         self._actions_enabled = action
         self.actionOpenFileBrowser.setEnabled(action)
         self.actionDataCutDisp.setEnabled(action)   
@@ -247,7 +247,7 @@ class FlightPlotWidget(QWidget):
         if hasattr(self, "line_canvas") and self.line_canvas is not None:
             self.line_canvas.setCursor(cursor)
         
-    def createLogoLabel(self):
+    def _create_logo_label(self):
         lbl_logo = QLabel("")
         lbl_logo.setPixmap(
             QPixmap(resource_path("kigam_geolux_logo.png")).scaledToWidth(210)
@@ -261,7 +261,7 @@ class FlightPlotWidget(QWidget):
         lbl_logo.setStyleSheet("padding: 30px;")
         return lbl_logo
 
-    def createFileList(self):
+    def _create_file_list(self):
         """Create the list widget that shows the loaded file names."""
         self.fileListWidget = QListWidget()
         self.fileListWidget.setSelectionMode(
@@ -277,7 +277,7 @@ class FlightPlotWidget(QWidget):
         )
         return self.fileListWidget
 
-    def createMapTypeSelector(self):
+    def _create_map_type_selector(self):
         container = QWidget()
         layout = QVBoxLayout(container)
         layout.setContentsMargins(0, 6, 0, 0)
@@ -298,14 +298,14 @@ class FlightPlotWidget(QWidget):
         layout.addWidget(self.mapTypeCombo)
         return container
 
-    def createPlotTabs(self):
+    def _create_plot_tabs(self):
         self.plotTabs = QTabWidget()
-        self.plotTabs.addTab(self.createCanvasPlot(), "Flight")
+        self.plotTabs.addTab(self._create_canvas_plot(), "Flight")
 
         line_tab = QWidget()
         line_layout = QVBoxLayout(line_tab)
         line_layout.setContentsMargins(0, 0, 0, 0)
-        line_layout.addWidget(self.createLineCanvasPlot())
+        line_layout.addWidget(self._create_line_canvas_plot())
         self.plotTabs.addTab(line_tab, "Line")
         self.plotTabs.currentChanged.connect(self._on_plot_tab_changed)
         return self.plotTabs
@@ -319,7 +319,7 @@ class FlightPlotWidget(QWidget):
         self._update_line_tab_controls(is_line_tab)
         if is_line_tab:
             if not self._plot_df_by_file:
-                self.updatePlot()
+                self.update_plot()
             needs_regen = (
                 self._line_plot_state_hash is not None
                 and self._line_base_state_hash != self._line_plot_state_hash
@@ -339,7 +339,7 @@ class FlightPlotWidget(QWidget):
                             "Line Data",
                             "No data available to regenerate.",
                         )
-            self.updateLinePlot()
+            self.update_line_plot()
         else:
             # Ensure line tools off when returning to Flight
             if self.actionDataCutDisp.isChecked():
@@ -414,7 +414,7 @@ class FlightPlotWidget(QWidget):
         self._restore_line_edit_state(state)
         self._refresh_line_tab_data()
         self._save_line_edit_state()
-        self.updateLinePlot()
+        self.update_line_plot()
 
     def _redo_line_edit(self) -> None:
         if not (
@@ -430,7 +430,7 @@ class FlightPlotWidget(QWidget):
         self._restore_line_edit_state(state)
         self._refresh_line_tab_data()
         self._save_line_edit_state()
-        self.updateLinePlot()
+        self.update_line_plot()
 
     def _refresh_line_tab_data(self) -> None:
         if not self._line_base_df_by_file:
@@ -511,7 +511,7 @@ class FlightPlotWidget(QWidget):
         self.actionDataCutDisp.setEnabled(base_enabled and is_line_tab)
         self.actionDataJoinDisp.setEnabled(base_enabled and is_line_tab)
 
-    def createCanvasPlot(self):
+    def _create_canvas_plot(self):
         """Create a canvas plot using matplotlib"""
         # Configure the matplotlib plot.
         self.fig, self.ax = plt.subplots(figsize=(10, 8), dpi=100)
@@ -533,7 +533,7 @@ class FlightPlotWidget(QWidget):
         self.canvas.mpl_connect("resize_event", self.on_resize)
         return self.canvas
 
-    def createLineCanvasPlot(self):
+    def _create_line_canvas_plot(self):
         self.line_fig, self.line_ax = plt.subplots(figsize=(10, 8), dpi=100)
         self.line_ax.set_title("Line Plot")
         self.line_ax.set_xlabel("Easting (m)")
@@ -561,7 +561,7 @@ class FlightPlotWidget(QWidget):
             and self._line_append_selected
         ):
             self._clear_line_append_selection()
-            self.updateLinePlot()
+            self.update_line_plot()
             return
         if event.button == 1 and self._handle_line_marker(event):
             return
@@ -706,10 +706,10 @@ class FlightPlotWidget(QWidget):
         self._line_append_selected.append((filename, int(record_id), px, py))
 
         if len(self._line_append_selected) < 2:
-            self.updateLinePlot()
+            self.update_line_plot()
             return True
 
-        self.updateLinePlot()
+        self.update_line_plot()
         action = self._prompt_lineappend_action()
         if action == "done":
             self._push_line_undo_state()
@@ -729,7 +729,7 @@ class FlightPlotWidget(QWidget):
             self._refresh_line_tab_data()
             self.actionDataJoinDisp.setChecked(False)
             self._save_line_edit_state()
-        self.updateLinePlot()
+        self.update_line_plot()
         return True
 
     def _prompt_lineappend_action(self):
@@ -896,13 +896,13 @@ class FlightPlotWidget(QWidget):
         if temporary:
             self._linecut_preview = (filename, int(record_id))
             self._linecut_point = (px, py)
-            self.updateLinePlot()
+            self.update_line_plot()
         action = self._prompt_linecut_action(filename, record_id)
         if action is None:
             if temporary:
                 self._linecut_point = None
                 self._linecut_preview = None
-                self.updateLinePlot()
+                self.update_line_plot()
             else:
                 self._linecut_point = None
             return True
@@ -926,7 +926,7 @@ class FlightPlotWidget(QWidget):
                 if temporary:
                     self._linecut_point = None
                     self._linecut_preview = None
-                    self.updateLinePlot()
+                    self.update_line_plot()
                 return True
             self._push_line_undo_state()
             self._line_delete_points.setdefault(filename, set()).add(record_id)
@@ -938,7 +938,7 @@ class FlightPlotWidget(QWidget):
             self._refresh_line_tab_data()
             self.actionDataCutDisp.setChecked(False)
             self._save_line_edit_state()
-        self.updateLinePlot()
+        self.update_line_plot()
         return True
 
     def _find_nearest_plot_point(self, x, y):
@@ -1037,16 +1037,16 @@ class FlightPlotWidget(QWidget):
 
     def on_item_clicked(self, item):
         file_name = item.text()
-        self.updatePlot()
+        self.update_plot()
 
     def on_file_selection_changed(self):
         selected = [item.text() for item in self.fileListWidget.selectedItems()]
         if not selected:
             self._clear_plot_for_empty_selection("No files selected  to plot.")
             return
-        self.updatePlot()
+        self.update_plot()
 
-    def calc_XYlimit_listAll(self):
+    def _calculate_xy_limits_all(self):
         all_x, all_y = [], []
         combined_df = getattr(self.db, "combined_df", None)
         if (
@@ -1062,10 +1062,10 @@ class FlightPlotWidget(QWidget):
                 for i in range(self.fileListWidget.count())
             ]
             for filename in listAll:
-                df = self.db.get_FlightData(filename)
+                df = self.db.get_flight_data(filename)
                 if df is None or df.empty:
                     continue
-                xdata, ydata, vals = self.db.get_XYMagData(df)
+                xdata, ydata, vals = self.db.get_xy_mag_data(df)
                 all_x.extend(xdata)
                 all_y.extend(ydata)
         if len(all_x) == 0 or len(all_y) == 0:
@@ -1218,9 +1218,9 @@ class FlightPlotWidget(QWidget):
             alt = pd.to_numeric(df["Altitude"], errors="coerce").to_numpy()
         return lats, lons, alt
 
-    def exportKML(self):
+    def export_kml(self):
         if not self._plot_df_by_file:
-            self.updatePlot()
+            self.update_plot()
         if not self._plot_df_by_file:
             QMessageBox.information(self, "Export KML", "No data to export.")
             return
@@ -1436,7 +1436,7 @@ class FlightPlotWidget(QWidget):
         if self._line_base_state_hash == self._line_plot_state_hash:
             return
         if self._regenerate_line_tab_data(reset_state=False):
-            self.updateLinePlot()
+            self.update_line_plot()
 
     def _restore_last_tab(self) -> None:
         """Select Line tab on project load if it was last used and data exists."""
@@ -1655,7 +1655,7 @@ class FlightPlotWidget(QWidget):
         entries.sort(key=self._line_plot_start_x)
         return entries
 
-    def updateLinePlot(self):
+    def update_line_plot(self):
         if self.line_ax is None or self.line_canvas is None:
             return
 
@@ -1736,7 +1736,7 @@ class FlightPlotWidget(QWidget):
         self.line_fig.tight_layout()
         self.line_canvas.draw()
 
-    def updatePlot(self):
+    def update_plot(self):
         cfg = config.get("filters")
         direction_degree = config.get("direction")
 
@@ -1768,7 +1768,7 @@ class FlightPlotWidget(QWidget):
                 logger.exception("Failed to create plot timeline")
             data_epsg = None
             for filename in selected:
-                src_df = self.db.get_FlightData(filename)
+                src_df = self.db.get_flight_data(filename)
                 if src_df is None or src_df.empty:
                     continue
                 filtered_df = self.db.get_filtered_data(
@@ -1813,7 +1813,7 @@ class FlightPlotWidget(QWidget):
                     seg_df = base_df
 
                 if xdata is None or ydata is None or vals is None:
-                    xdata, ydata, vals = self.db.get_XYMagData(seg_df)
+                    xdata, ydata, vals = self.db.get_xy_mag_data(seg_df)
 
                 if len(xdata) == 0:
                     continue
@@ -1867,7 +1867,9 @@ class FlightPlotWidget(QWidget):
                     all_lat, all_lon, data_epsg=data_epsg
                 )
 
-            data_minx, data_maxx, data_miny, data_maxy = self.calc_XYlimit_listAll()
+            data_minx, data_maxx, data_miny, data_maxy = (
+                self._calculate_xy_limits_all()
+            )
             # Always start the axes at the data bounds, matching the no-background view.
             # Even if the image is larger, the imshow extent still covers the full map during pan/zoom.
             self.ax.set_xlim(data_minx, data_maxx)
@@ -2020,7 +2022,7 @@ class FlightPlotWidget(QWidget):
             hasattr(self, "plotTabs")
             and self.plotTabs.tabText(self.plotTabs.currentIndex()) == "Line"
         ):
-            self.updateLinePlot()
+            self.update_line_plot()
 
     def _fit_bounds_to_canvas_equal(self, margin_ratio=0.05):
         """Expand x/y limits to fit the canvas while keeping aspect=equal (1:1)."""
@@ -2092,7 +2094,7 @@ class FlightPlotWidget(QWidget):
         ax.set_aspect("equal")
         canvas.draw_idle()
 
-    def updateFileList(self, files):
+    def update_file_list(self, files):
         """Update the list widget with files from the selected folder."""
         blocker = QSignalBlocker(self.fileListWidget)
         self.fileListWidget.clear()
@@ -2105,12 +2107,12 @@ class FlightPlotWidget(QWidget):
         del blocker
 
         proj_path = Path(config.get("project_path", ""))
-        self.db.clear_FlightData()
+        self.db.clear_flight_data()
 
         for file_name in files:
             file_path = proj_path / "Measure Flight Folder" / (file_name + ".csv")
-            self.db.load_FlightData(file_path)
-        self.updatePlot()
+            self.db.load_flight_data(file_path)
+        self.update_plot()
 
     def modify(self, points):
         user_response = QMessageBox.question(
@@ -2138,7 +2140,7 @@ class FlightPlotWidget(QWidget):
         config.set("filters", filters, save=True)
 
         if apply_area:
-            self.updatePlot()
+            self.update_plot()
 
     def load_bound_file(self, file_path):
         try:
@@ -2161,7 +2163,7 @@ class FlightPlotWidget(QWidget):
 
             config.set("bound_area_points", vertex_points, save=True)
             logger.info(f"Vertex load complete: {len(vertex_points)} points")
-            self.updatePlot()
+            self.update_plot()
 
         except Exception as e:
             logger.exception(f"Failed to load boundary file: {file_path}")
@@ -2171,7 +2173,7 @@ class FlightPlotWidget(QWidget):
                 f"An error occurred while opening or processing the file: {repr(e)}",
             )
 
-    def openFileBrowser(self):
+    def _open_file_browser(self):
         proj_path = Path(config.get("project_path", ""))
         if not proj_path:
             QMessageBox.warning(self, "ERROR", "Open a project folder first.")
@@ -2196,7 +2198,7 @@ class FlightPlotWidget(QWidget):
         list_files = list(set(list_files))
         config.set("Flight_File_List", list_files, save=True)
         logger.info(f"Added {len(files)} flight data file(s) from {open_path}")
-        self.updateFileList(list_files)
+        self.update_file_list(list_files)
 
     def initialize(self):
         filters_defaults = {
@@ -2229,7 +2231,7 @@ class FlightPlotWidget(QWidget):
             os.makedirs(flightData_path)
 
         list_files = config.get("Flight_File_List", [])
-        self.updateFileList(list_files)
+        self.update_file_list(list_files)
         logger.info(
             f"Flight plot initialized with {len(list_files)} project flight file(s)"
         )
@@ -2276,11 +2278,11 @@ class FlightPlotWidget(QWidget):
                     if name not in (link[0][0], link[1][0])
                 ]
             self._save_line_edit_state()
-            self.updatePlot()
+            self.update_plot()
 
     def delete_all_items(self):
         self.fileListWidget.clear()
-        self.db.clear_FlightData()
+        self.db.clear_flight_data()
         self._plot_df_by_file.clear()
         self._line_base_df_by_file.clear()
         self._line_base_intervals_by_file.clear()
@@ -2291,8 +2293,8 @@ class FlightPlotWidget(QWidget):
         self._reset_line_edit_state()
         self._refresh_line_tab_data()
         self._save_line_edit_state()
-        self.updatePlot()
-        self.updateLinePlot()
+        self.update_plot()
+        self.update_line_plot()
 
     def on_canvas_click(self, event):
         """Handle clicks on the canvas, specifically on the colorbar."""
@@ -2316,7 +2318,7 @@ class FlightPlotWidget(QWidget):
     def on_project_opened(self, project_path: str):
         self.initialize()
         self._load_line_edit_state()
-        self.updatePlot()
+        self.update_plot()
         self._ensure_line_tab_state_restored()
         self._restore_last_tab()
 
@@ -2346,7 +2348,7 @@ class FlightPlotWidget(QWidget):
         self._sync_map_type_selector(chosen)
         logger.info(f"Background map type changed to '{chosen}'")
         if update_plot:
-            self.updatePlot()
+            self.update_plot()
 
     def _on_map_type_changed(self, index: int) -> None:
         if index < 0:

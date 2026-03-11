@@ -14,7 +14,7 @@ def resource_path(name: str) -> str:
     return os.path.join(base_path, IMAGE_PATH, name)
 
 
-def load_SEC_file(file_path: str, out_folder: str = None) -> str | None:
+def load_sec_file(file_path: str, out_folder: str = None) -> str | None:
     """
     IAGA-2002 SEC 파일을 읽어서 필요한 컬럼만 추출 후 CSV로 저장합니다.
 

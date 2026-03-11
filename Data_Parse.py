@@ -219,7 +219,7 @@ class DataConverter:
 
             self.merge_csv_files_in_folder(out_path, imported_path, sampling_rate)
 
-    def convert_Diurnal_folder(
+    def convert_diurnal_folder(
         self,
         project_path: str,
         folder_path: str,
@@ -248,7 +248,7 @@ class DataConverter:
         self.merge_csv_files_in_folder(out_path, imported_path, sampling_rate)
 
 
-def importMagArrowFile(file_path, dest_folder_path, cfg):
+def import_mag_arrow_file(file_path, dest_folder_path, cfg):
     if os.path.exists(file_path):
         basename = os.path.basename(file_path)
         name_only, ext = os.path.splitext(basename)

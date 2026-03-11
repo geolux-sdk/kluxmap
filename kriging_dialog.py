@@ -116,11 +116,6 @@ class ColorbarRangeDialog(QDialog):
         self.min_input.setText(f"{min_val:.2f}")
         self.max_input.setText(f"{max_val:.2f}")
 
-    # Backward-compatible alias for older call sites.
-    def getValues(self):
-        return self.get_values()
-
-
 class ShadeSettingsDialog(QDialog):
     """Dialog to edit shade rendering parameters."""
 
@@ -356,10 +351,10 @@ class KrigingPlotDialog(QDialog):
         self.y = merged_df["Y"].to_numpy()
         self.z = merged_df[col_name].to_numpy()
 
-        self.initUI()
+        self._init_ui()
         QTimer.singleShot(100, self.run_kriging)
 
-    def initUI(self):
+    def _init_ui(self):
         layout = QVBoxLayout(self)
 
         ctrl_layout = QHBoxLayout()

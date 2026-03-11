@@ -67,9 +67,9 @@ class LinePlotWidget(QWidget):
         self._segment_counter = 0
         self._line_select_start = None
 
-        self.initUI()
+        self._init_ui()
 
-    def initUI(self):
+    def _init_ui(self):
         layout = QVBoxLayout()
         # Page toolbar
         toolbar = QToolBar()
@@ -79,17 +79,17 @@ class LinePlotWidget(QWidget):
             QIcon(resource_path("filter.png")), "Filter", self
         )
         self.actionDataConfig.setStatusTip("Data filter settings")
-        self.actionDataConfig.triggered.connect(self.openDataFilterDialog)
+        self.actionDataConfig.triggered.connect(self._open_data_filter_dialog)
 
         self.actionPlotKriging = QAction(
             QIcon(resource_path("griding.png")), "Gridding", self
         )
-        self.actionPlotKriging.triggered.connect(self.openKrigingDialog)
+        self.actionPlotKriging.triggered.connect(self._open_kriging_dialog)
 
         # Add the save action to the toolbar.
         self.actionSaveData = QAction(QIcon(resource_path("save.png")), "SAVE", self)
         self.actionSaveData.setStatusTip("Save processed data")
-        self.actionSaveData.triggered.connect(self.saveData)
+        self.actionSaveData.triggered.connect(self.save_data)
 
         toolbar.addAction(self.actionDataConfig)
         toolbar.addAction(self.actionPlotKriging)
@@ -100,14 +100,14 @@ class LinePlotWidget(QWidget):
         # Main layout
         vbox_layout = QVBoxLayout()
         vbox_layout.addWidget(
-            self.createFileList(), alignment=Qt.AlignmentFlag.AlignLeft
+            self._create_file_list(), alignment=Qt.AlignmentFlag.AlignLeft
         )
         ctrl_panel = QFrame()
         ctrl_panel.setLineWidth(3)
         ctrl_panel.setLayout(vbox_layout)
 
         data_layout = QHBoxLayout()
-        table_widget = self.createTableWidget()
+        table_widget = self._create_table_widget()
         data_layout.addWidget(table_widget, 1)
 
         # Container for the scatter plot and its controls
@@ -125,7 +125,7 @@ class LinePlotWidget(QWidget):
             self.scatter_colorbar_cb, alignment=Qt.AlignmentFlag.AlignRight
         )
         scatter_vbox.addWidget(
-            self.createScatterPlot()
+            self._create_scatter_plot()
         )  # Place the scatter plot below the checkbox
 
         data_layout.addWidget(scatter_container, 12)
@@ -136,7 +136,7 @@ class LinePlotWidget(QWidget):
         dataV_layout = QVBoxLayout()
         # Keep the lower plot shorter than the upper data area
         dataV_layout.addLayout(data_layout, 2)
-        dataV_layout.addWidget(self.createCanvasPlot(), 1)
+        dataV_layout.addWidget(self._create_canvas_plot(), 1)
 
         data_panel = QFrame()
         data_panel.setLayout(dataV_layout)
@@ -158,15 +158,15 @@ class LinePlotWidget(QWidget):
         self.actionPlotKriging.setEnabled(False)
         self.actionSaveData.setEnabled(False)
 
-    def actionEnable(self, action=True):
+    def set_actions_enabled(self, action=True):
         self.actionDataConfig.setEnabled(action)
         self.actionPlotKriging.setEnabled(action)
         self.actionSaveData.setEnabled(action)
 
-    def openDataFilterDialog(self):
+    def _open_data_filter_dialog(self):
         DataFilterDialog(self).exec()
 
-    def createScatterPlot(self):
+    def _create_scatter_plot(self):
         # Increase the default scatter plot size for dense scanline data
         self.scatter_fig, self.scatter_ax = plt.subplots(figsize=(8, 4), dpi=100)
         self.scatter_ax.set_title("Mag Value (Sensor_Total)")
@@ -180,7 +180,7 @@ class LinePlotWidget(QWidget):
         self.scatter_canvas.setMinimumHeight(300)
         return self.scatter_canvas
 
-    def createCanvasPlot(self):
+    def _create_canvas_plot(self):
         self.fig, self.ax = plt.subplots(figsize=(12, 2), dpi=100)
         self.canvas = FigureCanvas(self.fig)
         self.canvas.setSizePolicy(
@@ -190,7 +190,7 @@ class LinePlotWidget(QWidget):
         self.canvas.mpl_connect("button_release_event", self._on_lineplot_release)
         return self.canvas
 
-    def createFileList(self):
+    def _create_file_list(self):
         """Create the list widget that shows scanline files."""
         self.fileListWidget = QListWidget()
         self.fileListWidget.setSelectionMode(
@@ -204,7 +204,7 @@ class LinePlotWidget(QWidget):
         )
         return self.fileListWidget
 
-    def createTableWidget(self):
+    def _create_table_widget(self):
         self.tableWidget = QTableWidget()
         self.tableWidget.setSelectionBehavior(
             QAbstractItemView.SelectionBehavior.SelectColumns  # Select whole columns
@@ -317,7 +317,7 @@ class LinePlotWidget(QWidget):
         )
         return offsets
 
-    def updateFileList(self, file_paths):
+    def update_file_list(self, file_paths):
         """Refresh the list widget with selected scanline files."""
         self.fileListWidget.clear()
         self.scanline_df.clear()
@@ -1139,7 +1139,7 @@ class LinePlotWidget(QWidget):
         self._apply_calibration(df, mag, settings, "selftest")
         return df
 
-    def openKrigingDialog(self):
+    def _open_kriging_dialog(self):
         column_index = self.tableWidget.currentColumn()
         col_name = self.selected_df.columns[column_index]
         parent_window = self.main_window or self.window()
@@ -1154,7 +1154,7 @@ class LinePlotWidget(QWidget):
         self._open_kriging_dialogs = getattr(self, "_open_kriging_dialogs", [])
         self._open_kriging_dialogs.append(dlg)
 
-    def saveData(self):
+    def save_data(self):
         """
         Save the processed scanline data.
         1. Save each scanline back to its original CSV file.
@@ -1255,13 +1255,13 @@ class LinePlotWidget(QWidget):
                 ScanLineFiles = self.db.merge_and_save_scanlines_by_direction(
                     outfolder_path
                 )
-                self.updateFileList(ScanLineFiles)
+                self.update_file_list(ScanLineFiles)
                 logger.info(
                     f"Generated {len(ScanLineFiles)} scanline file(s) in {outfolder_path}"
                 )
                 QApplication.restoreOverrideCursor()
             else:
-                self.updateFileList(existing_files)
+                self.update_file_list(existing_files)
                 logger.info(
                     f"Loaded {len(existing_files)} existing scanline file(s) from {outfolder_path}"
                 )
@@ -1271,7 +1271,7 @@ class LinePlotWidget(QWidget):
             ScanLineFiles = self.db.merge_and_save_scanlines_by_direction(
                 outfolder_path
             )
-            self.updateFileList(ScanLineFiles)
+            self.update_file_list(ScanLineFiles)
             logger.info(
                 f"Generated {len(ScanLineFiles)} scanline file(s) in {outfolder_path}"
             )

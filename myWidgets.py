@@ -470,7 +470,7 @@ class DataSettingsDialog(QDialog):
         else:
             self.MainWindow.polygonDrawer.enable(False)
 
-        self.MainWindow.updatePlot()
+        self.MainWindow.update_plot()
         config.set("filters", self.fcfg, save=True)
         super().accept()
 
