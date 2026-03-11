@@ -5,6 +5,7 @@ import numpy as np
 import pandas as pd
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.colors import LightSource
+from matplotlib.path import Path as MplPath
 from pykrige.ok import OrdinaryKriging
 from PySide6.QtCore import QSize, Qt, QTimer
 from PySide6.QtGui import QAction, QIcon
@@ -24,6 +25,7 @@ from PySide6.QtWidgets import (
     QToolBar,
     QVBoxLayout,
 )
+from scipy.spatial import ConvexHull, QhullError
 
 from myResource import resource_path
 from mySettings import config
@@ -324,6 +326,7 @@ class KrigingPlotDialog(QDialog):
         self.filters = config.get("kriging", {})
         self.filters.setdefault("shade_params", dict(DEFAULT_SHADE_PARAMS))
         self.filters.setdefault("contour_params", dict(DEFAULT_CONTOUR_PARAMS))
+        self.filters.setdefault("clip_to_hull", True)
         self.contour_set = None
         self.shade_im = None
         self.colorbar = None
@@ -379,6 +382,10 @@ class KrigingPlotDialog(QDialog):
         self.scatter_cb = QCheckBox("Flight Path")
         self.scatter_cb.setChecked(False)
         ctrl_layout.addWidget(self.scatter_cb)
+
+        self.clip_to_hull_cb = QCheckBox("Clip Outside Data")
+        self.clip_to_hull_cb.setChecked(bool(self.filters.get("clip_to_hull", True)))
+        ctrl_layout.addWidget(self.clip_to_hull_cb)
 
         current_variogram = self.filters.get("variogram", "linear")
         index = self.variogram_cb.findText(
@@ -547,6 +554,27 @@ class KrigingPlotDialog(QDialog):
             except Exception as e:
                 QMessageBox.critical(self, "Error", f"Failed to save plot:\n{e}")
 
+    def _build_hull_mask(self, gx, gy):
+        points = np.column_stack([self.x, self.y])
+        points = points[np.isfinite(points).all(axis=1)]
+        if len(points) < 3:
+            return None
+
+        unique_points = np.unique(points, axis=0)
+        if len(unique_points) < 3:
+            return None
+
+        try:
+            hull = ConvexHull(unique_points)
+        except QhullError:
+            return None
+
+        hull_points = unique_points[hull.vertices]
+        hull_path = MplPath(np.vstack([hull_points, hull_points[0]]))
+        grid_points = np.column_stack([gx.ravel(), gy.ravel()])
+        outside = ~hull_path.contains_points(grid_points, radius=1e-9)
+        return outside.reshape(gx.shape)
+
     def run_kriging(self):
         QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
         try:
@@ -582,8 +610,22 @@ class KrigingPlotDialog(QDialog):
 
             gridx = np.linspace(grid_min_x, grid_max_x, grid_size_x)
             gridy = np.linspace(grid_min_y, grid_max_y, grid_size_y)
+            gx, gy = np.meshgrid(gridx, gridy)
 
             z_interp, _ = OK.execute("grid", gridx, gridy)
+            z_interp = np.ma.array(z_interp, copy=False)
+            clip_to_hull = self.clip_to_hull_cb.isChecked()
+            self.filters["clip_to_hull"] = clip_to_hull
+            hull_mask = None
+            if clip_to_hull:
+                hull_mask = self._build_hull_mask(gx, gy)
+                if hull_mask is not None:
+                    z_interp = np.ma.array(
+                        z_interp,
+                        mask=np.ma.getmaskarray(z_interp) | hull_mask,
+                        copy=False,
+                    )
+            valid_values = np.ma.compressed(z_interp)
             if self.colorbar:
                 self.colorbar.remove()
                 self.colorbar = None
@@ -610,7 +652,6 @@ class KrigingPlotDialog(QDialog):
                 self.scatter_plot = None
 
             self.ax.clear()
-            gx, gy = np.meshgrid(gridx, gridy)
             self.im = self.ax.pcolormesh(gx, gy, z_interp, shading="auto", cmap="jet")
             self.ax.set_title(f"{self.title} DATA")
 
@@ -622,52 +663,58 @@ class KrigingPlotDialog(QDialog):
                     azdeg=shade_params["azdeg"],
                     altdeg=shade_params["altdeg"],
                 )
-                shade = ls.hillshade(
-                    z_interp,
-                    vert_exag=shade_params["vert_exag"],
-                    fraction=shade_params["fraction"],
-                )
-                shadow_alpha = np.clip(
-                    (1.0 - shade) * shade_params["alpha_scale"],
-                    0.0,
-                    shade_params["alpha_max"],
-                )
-                shadow_rgba = np.zeros(shade.shape + (4,), dtype=float)
-                shadow_rgba[..., 3] = shadow_alpha
-                self.shade_im = self.ax.imshow(
-                    shadow_rgba,
-                    extent=[grid_min_x, grid_max_x, grid_min_y, grid_max_y],
-                    origin="lower",
-                    aspect="equal",
-                    zorder=self.im.get_zorder() + 1,
-                )
+                if valid_values.size:
+                    shade = ls.hillshade(
+                        np.ma.filled(z_interp, float(np.mean(valid_values))),
+                        vert_exag=shade_params["vert_exag"],
+                        fraction=shade_params["fraction"],
+                    )
+                    shadow_alpha = np.clip(
+                        (1.0 - shade) * shade_params["alpha_scale"],
+                        0.0,
+                        shade_params["alpha_max"],
+                    )
+                    if hull_mask is not None:
+                        shadow_alpha = np.where(hull_mask, 0.0, shadow_alpha)
+                    shadow_rgba = np.zeros(shade.shape + (4,), dtype=float)
+                    shadow_rgba[..., 3] = shadow_alpha
+                    self.shade_im = self.ax.imshow(
+                        shadow_rgba,
+                        extent=[grid_min_x, grid_max_x, grid_min_y, grid_max_y],
+                        origin="lower",
+                        aspect="equal",
+                        zorder=self.im.get_zorder() + 1,
+                    )
 
             if self.contour_cb.isChecked():
                 contour_params = dict(DEFAULT_CONTOUR_PARAMS)
                 contour_params.update(self.filters.get("contour_params", {}))
-                z_min = float(np.nanmin(z_interp))
-                z_max = float(np.nanmax(z_interp))
+                if valid_values.size == 0:
+                    levels = None
+                else:
+                    z_min = float(np.min(valid_values))
+                    z_max = float(np.max(valid_values))
 
-                if contour_params["scale"] == "log":
-                    if z_min <= 0 or z_max <= 0:
-                        QMessageBox.warning(
-                            self,
-                            "Contour Warning",
-                            "Log Scale contour requires positive interpolated values.",
-                        )
-                        levels = None
+                    if contour_params["scale"] == "log":
+                        if z_min <= 0 or z_max <= 0:
+                            QMessageBox.warning(
+                                self,
+                                "Contour Warning",
+                                "Log Scale contour requires positive interpolated values.",
+                            )
+                            levels = None
+                        else:
+                            levels = np.geomspace(
+                                z_min,
+                                z_max,
+                                int(contour_params["levels"]),
+                            )
                     else:
-                        levels = np.geomspace(
+                        levels = np.linspace(
                             z_min,
                             z_max,
                             int(contour_params["levels"]),
                         )
-                else:
-                    levels = np.linspace(
-                        z_min,
-                        z_max,
-                        int(contour_params["levels"]),
-                    )
 
                 if levels is not None:
                     self.contour_set = self.ax.contour(
