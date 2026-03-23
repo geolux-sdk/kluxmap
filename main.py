@@ -66,7 +66,9 @@ def main():
         """
     )
 
-    splash_pix = QPixmap(resource_path(SPLASH_IMAGE))
+    splash_pix = QPixmap(resource_path(SPLASH_IMAGE)).scaled(
+        512, 512, Qt.KeepAspectRatio, Qt.SmoothTransformation
+    )
     splash = QSplashScreen(splash_pix, Qt.WindowStaysOnTopHint)
     splash.setMask(splash_pix.mask())
     splash.show()
