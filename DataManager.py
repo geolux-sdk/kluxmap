@@ -557,16 +557,25 @@ class DataManager:
         import numpy as np
         import pandas as pd
 
-        def _line_start_x(df: pd.DataFrame) -> float:
-            if df is None or df.empty or "X" not in df.columns:
+        def _line_order_value(df: pd.DataFrame) -> float:
+            if df is None or df.empty or not {"X", "Y"}.issubset(df.columns):
                 return float("inf")
-            series = pd.to_numeric(df["X"], errors="coerce")
-            if series.empty:
+            x = pd.to_numeric(df["X"], errors="coerce")
+            y = pd.to_numeric(df["Y"], errors="coerce")
+            mask = x.notna() & y.notna()
+            if not mask.any():
                 return float("inf")
-            first = series.iloc[0]
-            if pd.isna(first):
-                return float("inf")
-            return float(first)
+            ref_x = float(x[mask].mean())
+            ref_y = float(y[mask].mean())
+
+            # Ignore the forward/backward sign of the project azimuth so
+            # N/S and S/N share the same left->right ordering, and E/W and
+            # W/E share the same top->bottom ordering.
+            main_axis_deg = float(config.get("direction", 0) or 0) % 180.0
+            cross_axis_deg = (main_axis_deg + 90.0) % 360.0
+            ux = float(np.sin(np.deg2rad(cross_axis_deg)))
+            uy = float(np.cos(np.deg2rad(cross_axis_deg)))
+            return ref_x * ux + ref_y * uy
 
         scanline_df_by_file = getattr(self, "scanline_df_by_file", {})
         if scanline_df_by_file:
@@ -614,7 +623,7 @@ class DataManager:
 
                     merged = pd.concat(parts, ignore_index=True)
                     line_entries.append(
-                        {"df": merged, "start_x": _line_start_x(merged)}
+                        {"df": merged, "order_value": _line_order_value(merged)}
                     )
             for filename, df in scanline_df_by_file.items():
                 if df is None or df.empty:
@@ -649,12 +658,12 @@ class DataManager:
                         continue
                     g["record_id"] = pd.to_numeric(g["record_id"], errors="coerce")
                     g = g.sort_values("record_id").reset_index(drop=True)
-                    line_entries.append({"df": g, "start_x": _line_start_x(g)})
+                    line_entries.append({"df": g, "order_value": _line_order_value(g)})
 
             if not line_entries:
                 return saved_files
 
-            line_entries.sort(key=lambda item: item["start_x"])
+            line_entries.sort(key=lambda item: item["order_value"])
             outdir = Path(output_dir)
             outdir.mkdir(parents=True, exist_ok=True)
             total = len(line_entries)
@@ -708,14 +717,14 @@ class DataManager:
         if not groups:
             return []
 
-        def _safe_start_x(value: float) -> float:
+        def _safe_order_value(value: float) -> float:
             try:
-                x = float(value)
+                order_value = float(value)
             except (TypeError, ValueError):
                 return float("inf")
-            return x if np.isfinite(x) else float("inf")
+            return order_value if np.isfinite(order_value) else float("inf")
 
-        groups.sort(key=lambda it: _safe_start_x(it["start"][0]))
+        groups.sort(key=lambda it: _safe_order_value(_line_order_value(it["df"])))
 
         # Merge-by-direction disabled; save each continuous record_id group as-is.
         saved_files: list[str] = []

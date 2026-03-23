@@ -438,21 +438,39 @@ class LinePlotWidget(QWidget):
         x, y = self.selected_df["X"], self.selected_df["Y"]
         self.scatter_ax.scatter(x, y, color="black", s=3)
 
-        # Draw direction arrow near midpoint
+        # Draw direction arrow using the local direction around the midpoint
         if len(self.selected_df) >= 2:
-            y_start = self.selected_df["Y"].iloc[0]
-            y_end = self.selected_df["Y"].iloc[-1]
             mid_idx = len(self.selected_df) // 2
-            start_x = self.selected_df["X"].iloc[mid_idx]
-            start_y = self.selected_df["Y"].iloc[mid_idx]
-            end_y = start_y + 5 if y_end > y_start else start_y - 5
-            self.scatter_ax.annotate(
-                "",
-                xy=(start_x + 5, end_y + 5),
-                xytext=(start_x + 5, start_y + 5),
-                arrowprops=dict(arrowstyle="->", color="green", lw=3),
-                zorder=6,
-            )
+            prev_idx = max(mid_idx - 1, 0)
+            next_idx = min(mid_idx + 1, len(self.selected_df) - 1)
+
+            x0 = float(self.selected_df["X"].iloc[prev_idx])
+            y0 = float(self.selected_df["Y"].iloc[prev_idx])
+            x1 = float(self.selected_df["X"].iloc[next_idx])
+            y1 = float(self.selected_df["Y"].iloc[next_idx])
+
+            dx = x1 - x0
+            dy = y1 - y0
+            seg_len = math.hypot(dx, dy)
+
+            if seg_len > 0:
+                mid_x = (x0 + x1) / 2.0
+                mid_y = (y0 + y1) / 2.0
+
+                arrow_len = max(np.ptp(x.to_numpy()), np.ptp(y.to_numpy())) * 0.05
+                if arrow_len == 0:
+                    arrow_len = 1.0
+
+                ux = dx / seg_len
+                uy = dy / seg_len
+
+                self.scatter_ax.annotate(
+                    "",
+                    xy=(mid_x + ux * arrow_len, mid_y + uy * arrow_len),
+                    xytext=(mid_x, mid_y),
+                    arrowprops=dict(arrowstyle="-|>", color="red", lw=5,mutation_scale=20,),
+                    zorder=6,
+                )
 
     def _format_scatter_axes(self, val_col: str):
         """Apply common scatter-axis formatting."""
