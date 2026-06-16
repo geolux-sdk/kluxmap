@@ -401,7 +401,14 @@ class KLuxMap(QMainWindow):
 
     def _open_project_folder(self):
         last_folder = self.settings.value("projects/last", "", type=str)
-        default_path = Path(last_folder) if last_folder else Path.home()
+        default_path = Path.home()
+        if last_folder:
+            last_path = Path(last_folder)
+            # Open one level above the last project to make sibling projects easier to pick.
+            if last_path.parent.exists():
+                default_path = last_path.parent
+            elif last_path.exists():
+                default_path = last_path
         if not default_path.exists():
             default_path = Path.home()
         folder_path = QFileDialog.getExistingDirectory(
