@@ -193,6 +193,8 @@ class ConvertDataDialog(QDialog):
         self.opt_v2022_south.toggled.connect(self._update_ok_enabled)
         self.opt_v2023_north.toggled.connect(self._update_ok_enabled)
         self.opt_v2023_south.toggled.connect(self._update_ok_enabled)
+        self.v2025_radio_folder.toggled.connect(self._update_ok_enabled)
+        self.v2025_radio_file.toggled.connect(self._update_ok_enabled)
         self.opt_arrow_1000.toggled.connect(self._update_ok_enabled)
         self.opt_arrow_100.toggled.connect(self._update_ok_enabled)
         self.opt_arrow_10.toggled.connect(self._update_ok_enabled)
@@ -411,7 +413,10 @@ class ConvertDataDialog(QDialog):
                 self.opt_v2023_north.isChecked() or self.opt_v2023_south.isChecked()
             )
         elif self.grp_v2025.isChecked():
-            ok_enabled = True
+            ok_enabled = (
+                self.v2025_radio_folder.isChecked()
+                or self.v2025_radio_file.isChecked()
+            )
         elif self.grp_arrow.isChecked():
             ok_enabled = (
                 self.opt_arrow_1000.isChecked()
@@ -607,7 +612,8 @@ class Converter(QThread):
                 last_folder = os.path.basename(parent_dir)
                 processed_dir = os.path.join(self.processed_folder_path, last_folder)
                 os.makedirs(processed_dir, exist_ok=True)
-                hemi = self.selection.get("option")["hemisphere"]
+                option = self.selection.get("option") or {}
+                hemi = option.get("hemisphere", "Northern Hemisphere")
 
             for i, fpath in enumerate(targets, start=1):
                 if self._cancel:
@@ -627,7 +633,14 @@ class Converter(QThread):
                     basename = os.path.basename(fpath)
                     name_only, ext = os.path.splitext(basename)
                     output = os.path.join(processed_dir, name_only + ".csv")
-                    self.MagHawkConverter.convert_file(fpath, output, "csv", 1000, hemi)
+                    if device == "Mag Hawk V2025":
+                        self.MagHawkConverter.convert_file_v2025(
+                            fpath, output, "csv", 1000
+                        )
+                    else:
+                        self.MagHawkConverter.convert_file(
+                            fpath, output, "csv", 1000, hemi
+                        )
 
                 # i개 처리 완료 → 진행값 i로 갱신
                 self.progress.emit(i)

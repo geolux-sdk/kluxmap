@@ -1,6 +1,7 @@
 import os
 import re
 import struct
+import ctypes
 from io import StringIO
 
 import numpy as np
@@ -18,6 +19,10 @@ class DataConverter:
     LATITUDE_FRAC_LEN = 5
     ALTITUDE_FRAC_LEN = 1
     BLOCK_FORMAT = "<2BHHHIIhH3i"
+    V2025_BLOCK_FORMAT = "<6BHddh6x4i"
+    V2025_SHORT_BLOCK_HEADER = 0xAAAA
+    V2025_ADC_DATA_FORMAT = "<4i"
+    _minilzo_lib = None
 
     def __init__(self):
         pass
@@ -26,6 +31,35 @@ class DataConverter:
         degrees = int(degrees_minutes // 100)
         minutes = degrees_minutes % 100
         return degrees + minutes / 60
+
+    def _extract_file_time(self, input_file, pattern):
+        match = re.search(pattern, os.path.basename(input_file), re.IGNORECASE)
+        if not match:
+            raise ValueError(
+                f"Input file name does not match expected Mag Hawk format: {input_file}"
+            )
+        return match.group(1), match.group(2)[:2]
+
+    def _save_dataframe(self, df, output_file, filetype):
+        if filetype == "xlsx":
+            df.to_excel(output_file, index=False, engine="xlsxwriter")
+        else:
+            df.to_csv(output_file, index=False)
+
+    def _empty_output_dataframe(self):
+        return pd.DataFrame(
+            columns=[
+                "Counter",
+                "Date",
+                "Time",
+                "Latitude",
+                "Longitude",
+                "Mag",
+                "Sensor_X",
+                "Sensor_Y",
+                "Sensor_Z",
+            ]
+        )
 
     def parse_input_data(
         self, subsample: int, binary_data: bytes, date, hour
@@ -141,21 +175,333 @@ class DataConverter:
 
         return df_out
 
-    def convert_file(self, input_file, output_file, filetype, subsample, hemisphere):
-        match = re.search(r"_(\d{6})_(\d{4})", input_file)
-        date, hour = match.group(1), match.group(2)[:2]
+    def _load_minilzo_library(self):
+        if DataConverter._minilzo_lib is not None:
+            return DataConverter._minilzo_lib
 
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        candidates = [
+            os.path.join(base_dir, "minilzo.dll"),
+            os.path.join(base_dir, "minilzo.so"),
+            os.path.join(base_dir, "test", "MAGHAWK_V2025_DATA", "minilzo.dll"),
+            os.path.join(base_dir, "test", "MAGHAWK_V2025_DATA", "minilzo.so"),
+        ]
+        errors = []
+        for path in candidates:
+            if not os.path.exists(path):
+                continue
+            try:
+                lib = ctypes.cdll.LoadLibrary(path)
+                DataConverter._minilzo_lib = lib
+                return lib
+            except OSError as err:
+                errors.append(f"{path}: {err}")
+
+        msg = "V2025 compressed data requires a minilzo native library."
+        if errors:
+            msg += " Load attempts failed: " + "; ".join(errors)
+        raise RuntimeError(msg)
+
+    def _decompress_v2025_block(self, block: bytes, raw_remaining: int) -> bytes:
+        lib = self._load_minilzo_library()
+        in_buf = ctypes.create_string_buffer(block)
+        in_len = ctypes.c_int(len(block))
+        out_size = max(len(block) * 10, 65536)
+        if raw_remaining > 0:
+            out_size = min(max(out_size, len(block)), raw_remaining)
+
+        while True:
+            out_buf = ctypes.create_string_buffer(out_size)
+            out_len = ctypes.c_int(out_size)
+            result = lib.lzo1x_decompress(
+                ctypes.byref(in_buf),
+                in_len,
+                ctypes.byref(out_buf),
+                ctypes.byref(out_len),
+            )
+            if result == 0:
+                return out_buf.raw[: out_len.value]
+
+            if raw_remaining <= 0 or out_size >= raw_remaining:
+                raise RuntimeError(f"minilzo decompression failed with code {result}")
+            out_size = min(out_size * 2, raw_remaining)
+
+    def _decompress_v2025_data(self, binary_data: bytes) -> bytes:
+        raw_data_size = int.from_bytes(binary_data[4:8], byteorder="little")
+        decompressed_data = bytearray()
+        read_idx = 8
+        block_num = 0
+
+        while read_idx < len(binary_data):
+            if read_idx + 4 > len(binary_data):
+                raise ValueError(f"Truncated V2025 compression header at block {block_num}")
+
+            file_compression_flag = binary_data[read_idx]
+            checksum = binary_data[read_idx + 1]
+            block_size = int.from_bytes(
+                binary_data[read_idx + 2 : read_idx + 4], byteorder="little"
+            )
+            read_idx += 4
+            block_end = read_idx + block_size
+            if block_end > len(binary_data):
+                raise ValueError(f"Truncated V2025 compression block {block_num}")
+
+            block = binary_data[read_idx:block_end]
+            if sum(block) & 0xFF != checksum:
+                raise ValueError(
+                    f"V2025 checksum error at block {block_num} "
+                    f"with compressed size {block_size}"
+                )
+
+            if file_compression_flag:
+                raw_remaining = raw_data_size - len(decompressed_data)
+                decompressed_data += self._decompress_v2025_block(block, raw_remaining)
+            else:
+                decompressed_data += block
+
+            block_num += 1
+            read_idx += block_size + (4 - block_size % 4) % 4
+
+        return bytes(decompressed_data)
+
+    def parse_input_data_v2025(
+        self, subsample: int, binary_data: bytes
+    ) -> pd.DataFrame:
+        if subsample <= 0:
+            raise ValueError("subsample must be greater than zero")
+
+        if binary_data.startswith(b"MLZO"):
+            binary_data = self._decompress_v2025_data(binary_data)
+
+        full_block_size = struct.calcsize(self.V2025_BLOCK_FORMAT)
+        adc_data_size = struct.calcsize(self.V2025_ADC_DATA_FORMAT)
+        short_block_size = 2 + 2 + adc_data_size
+        records = []
+        offset = 0
+        total_len = len(binary_data)
+        ctx = {
+            "year": 0,
+            "month": 0,
+            "day": 0,
+            "hours": 0,
+            "minutes": 0,
+            "seconds": 0,
+            "latitude": 0.0,
+            "longitude": 0.0,
+            "altitude": 0,
+        }
+
+        while offset < total_len:
+            is_short_block = False
+            if offset > 0:
+                if total_len - offset < 2:
+                    logger.warning(f"Stopping V2025 parse: short header at {offset}")
+                    break
+                (header,) = struct.unpack_from("<H", binary_data, offset)
+                is_short_block = header == self.V2025_SHORT_BLOCK_HEADER
+
+            if is_short_block:
+                if total_len - offset < short_block_size:
+                    logger.warning(f"Stopping V2025 parse: short block at {offset}")
+                    break
+                (subseconds,) = struct.unpack_from("<H", binary_data, offset + 2)
+                adc_values = struct.unpack_from(
+                    self.V2025_ADC_DATA_FORMAT, binary_data, offset + 4
+                )
+                records.append(
+                    [
+                        ctx["year"],
+                        ctx["month"],
+                        ctx["day"],
+                        ctx["hours"],
+                        ctx["minutes"],
+                        ctx["seconds"],
+                        subseconds,
+                        ctx["latitude"],
+                        ctx["longitude"],
+                        ctx["altitude"],
+                        *adc_values,
+                    ]
+                )
+                offset += short_block_size
+                continue
+
+            if total_len - offset < full_block_size:
+                logger.warning(f"Stopping V2025 parse: full block at {offset}")
+                break
+
+            (
+                month,
+                day,
+                year,
+                hours,
+                minutes,
+                seconds,
+                subseconds,
+                latitude,
+                longitude,
+                altitude,
+                *adc_values,
+            ) = struct.unpack_from(self.V2025_BLOCK_FORMAT, binary_data, offset)
+
+            ctx.update(
+                {
+                    "year": year,
+                    "month": month,
+                    "day": day,
+                    "hours": hours,
+                    "minutes": minutes,
+                    "seconds": seconds,
+                    "latitude": latitude,
+                    "longitude": longitude,
+                    "altitude": altitude,
+                }
+            )
+            records.append(
+                [
+                    year,
+                    month,
+                    day,
+                    hours,
+                    minutes,
+                    seconds,
+                    subseconds,
+                    latitude,
+                    longitude,
+                    altitude,
+                    *adc_values,
+                ]
+            )
+            offset += full_block_size
+
+        if not records:
+            return self._empty_output_dataframe()
+
+        df_all = pd.DataFrame(
+            records,
+            columns=[
+                "Year",
+                "Month",
+                "Day",
+                "Hours",
+                "Minutes",
+                "Seconds",
+                "Miliseconds",
+                "Latitude",
+                "Longitude",
+                "Altitude",
+                "ADC0",
+                "ADC1",
+                "ADC2",
+                "ADC3",
+            ],
+        )
+
+        df_sensor_data = (
+            df_all[["ADC0", "ADC1", "ADC2"]]
+            .rename(
+                columns={
+                    "ADC0": "Sensor_X",
+                    "ADC1": "Sensor_Y",
+                    "ADC2": "Sensor_Z",
+                }
+            )
+            * self.CONVERSION_GAIN
+        )
+        for col in ["Sensor_X", "Sensor_Y", "Sensor_Z"]:
+            df_sensor_data[col] = median_filter(
+                df_sensor_data[col], size=5, mode="nearest"
+            )
+
+        df_position = df_all[["Latitude", "Longitude", "Altitude"]].copy()
+        for col in ["Longitude", "Latitude", "Altitude"]:
+            s = df_position[col].astype(float)
+            df_position[col] = s.interpolate(method="linear", limit_direction="both")
+
+        df_time = df_all[
+            ["Year", "Month", "Day", "Hours", "Minutes", "Seconds", "Miliseconds"]
+        ].copy()
+        df_samples = pd.concat([df_time, df_position, df_sensor_data], axis=1)
+        df_samples["Mag"] = ((df_sensor_data**2).sum(axis=1) ** 0.5) * 1000
+
+        num_groups = len(df_samples) // subsample
+        if num_groups == 0:
+            return self._empty_output_dataframe()
+
+        valid_len = num_groups * subsample
+        df_samples = df_samples.iloc[:valid_len].copy()
+        df_samples["__group"] = np.repeat(np.arange(num_groups), subsample)
+        grouped = df_samples.groupby("__group")
+        df_mean = grouped.mean(numeric_only=True).reset_index(drop=True)
+        df_first = grouped[["Year", "Month", "Day"]].first().reset_index(drop=True)
+        df_mean[["Year", "Month", "Day"]] = df_first[["Year", "Month", "Day"]]
+
+        year = df_mean["Year"].astype(int).astype(str).str.zfill(2)
+        month = df_mean["Month"].astype(int).astype(str).str.zfill(2)
+        day = df_mean["Day"].astype(int).astype(str).str.zfill(2)
+        df_mean.insert(0, "Date", "20" + year + "-" + month + "-" + day)
+
+        step = 1000 / subsample
+        ms_sec = df_mean["Miliseconds"].astype(int) / 1000
+        ms_adj = np.floor(ms_sec * step) / step * 1000
+
+        df_mean["Time"] = (
+            df_mean["Hours"].astype(int).astype(str).str.zfill(2)
+            + ":"
+            + df_mean["Minutes"].astype(int).astype(str).str.zfill(2)
+            + ":"
+            + df_mean["Seconds"].astype(int).astype(str).str.zfill(2)
+            + "."
+            + ms_adj.astype(int).astype(str).str.zfill(3)
+        )
+
+        df_mean["Counter"] = (
+            df_mean["Hours"].astype(int) * 3600000
+            + df_mean["Minutes"].astype(int) * 60000
+            + df_mean["Seconds"].astype(int) * 1000
+            + df_mean["Miliseconds"].astype(int)
+        ).astype(np.int32)
+
+        return df_mean[
+            [
+                "Counter",
+                "Date",
+                "Time",
+                "Latitude",
+                "Longitude",
+                "Mag",
+                "Sensor_X",
+                "Sensor_Y",
+                "Sensor_Z",
+            ]
+        ].copy()
+
+    def convert_file(self, input_file, output_file, filetype, subsample, hemisphere):
         try:
+            date, hour = self._extract_file_time(input_file, r"_(\d{6})_(\d{4})")
             with open(input_file, "rb") as file:
                 binary_data = file.read()
             df = self.parse_input_data(subsample, binary_data, date, hour)
             if hemisphere != "Northern Hemisphere":
                 df["Latitude"] = df["Latitude"] * -1
 
-            if filetype == "xlsx":
-                df.to_excel(output_file, index=False, engine="xlsxwriter")
-            else:
-                df.to_csv(output_file, index=False)
+            self._save_dataframe(df, output_file, filetype)
+        except FileNotFoundError:
+            logger.error(f"Error: File '{input_file}' not found.")
+        except PermissionError:
+            logger.error(
+                f"Error: File {output_file} is already in use so it cannot be saved."
+            )
+        except Exception:
+            logger.exception(f"Unexpected error while converting '{input_file}'")
+
+    def convert_file_v2025(self, input_file, output_file, filetype, subsample):
+        try:
+            self._extract_file_time(input_file, r"^Mag_(\d{6})_(\d{4})\.dat$")
+            with open(input_file, "rb") as file:
+                binary_data = file.read()
+            df = self.parse_input_data_v2025(subsample, binary_data)
+            self._save_dataframe(df, output_file, filetype)
         except FileNotFoundError:
             logger.error(f"Error: File '{input_file}' not found.")
         except PermissionError:
