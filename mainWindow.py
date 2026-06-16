@@ -442,10 +442,30 @@ class KLuxMap(QMainWindow):
 
     def _open_project(self, folder_path: str | Path):
         folder_path = Path(folder_path)
-        config.set_path(folder_path / "project_settings.json")
-        config.load()
+        settings_path = folder_path / "project_settings.json"
+        if not settings_path.is_file():
+            QMessageBox.warning(
+                self,
+                "Open Project",
+                f"Project settings file not found:\n{settings_path}\n\n"
+                "Select an existing project folder, or create a new project first.",
+            )
+            logger.warning(f"Project settings file not found: {settings_path}")
+            return
+
+        try:
+            config.set_path(settings_path)
+            config.load()
+        except Exception as e:
+            QMessageBox.critical(
+                self,
+                "Open Project",
+                f"Failed to open project settings:\n{settings_path}\n\nError: {e}",
+            )
+            logger.exception(f"Failed to open project settings: {settings_path}")
+            return
+
         config.set("project_path", str(folder_path), save=True)
-        make_project_subfolder(".processed")
 
         self.openProject_action.setEnabled(False)
         self.createProject_action.setEnabled(False)

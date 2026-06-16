@@ -2224,12 +2224,6 @@ class FlightPlotWidget(QWidget):
         config.set("filters", filters, save=True)
         self._set_map_type("none", update_plot=False, log_source="initialize")
 
-        flightData_path = os.path.join(
-            config.get("project_path", ""), "Measure Flight Folder"
-        )
-        if not os.path.exists(flightData_path):
-            os.makedirs(flightData_path)
-
         list_files = config.get("Flight_File_List", [])
         self.update_file_list(list_files)
         logger.info(
