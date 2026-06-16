@@ -15,7 +15,7 @@ APP_NAME = "KLuxMap"
 APP_DIR = Path.home() / f".{APP_NAME}"
 LOG_DIR = APP_DIR / "log"
 SPLASH_IMAGE = "splash_screen.png"
-LICENSE_EXPIRY_DATE = date(2026, 6, 16)
+LICENSE_EXPIRY_DATE = date(2026, 10, 1)
 
 
 def _setup_logging() -> None:
