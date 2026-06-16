@@ -624,9 +624,13 @@ class FlightPlotWidget(QWidget):
         self.line_canvas.draw_idle()
 
     def on_resize(self, event):
+        if self._is_polygon_drawer_active():
+            return
         self._fit_bounds_to_canvas_equal(margin_ratio=0.05)
 
     def on_press(self, event):
+        if self._is_polygon_drawer_active():
+            return
         if event.button == 1 and self._handle_line_marker(event):
             return
         if event.button == 1 and event.inaxes == self.ax:
@@ -995,6 +999,8 @@ class FlightPlotWidget(QWidget):
             self._last_mouse_pos = None
 
     def on_motion(self, event):
+        if self._is_polygon_drawer_active():
+            return
         if not self._is_panning or event.inaxes != self.ax:
             return
 
@@ -1014,6 +1020,8 @@ class FlightPlotWidget(QWidget):
         self.canvas.draw_idle()
 
     def scroll(self, event):
+        if self._is_polygon_drawer_active():
+            return
         if event.inaxes != self.ax:
             return
 
@@ -2141,6 +2149,12 @@ class FlightPlotWidget(QWidget):
 
         if apply_area:
             self.update_plot()
+
+    def _is_polygon_drawer_active(self):
+        return bool(
+            hasattr(self, "polygonDrawer")
+            and getattr(self.polygonDrawer, "_enabled", False)
+        )
 
     def load_bound_file(self, file_path):
         try:

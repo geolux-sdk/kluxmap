@@ -521,10 +521,19 @@ class OrthogonalPolygonDrawer(QObject):
         self.lines = []  # Drawn line artists.
         self.preview_line = None  # Preview line shown while moving the mouse.
         self.close_threshold = close_threshold_px  # Pixel distance used to auto-close.
+        self._enabled = False
+        self._finalized = False
+        self.cid_press = None
+        self.cid_move = None
+        self.cid_key = None
 
     def on_press(self, event):
+        if not self._enabled or self._finalized:
+            return
         # Only process clicks inside the target axes.
         if event.inaxes != self.ax:
+            return
+        if event.xdata is None or event.ydata is None:
             return
         x, y = event.xdata, event.ydata
 
@@ -571,8 +580,12 @@ class OrthogonalPolygonDrawer(QObject):
             self.canvas.draw_idle()
 
     def on_move(self, event):
+        if not self._enabled or self._finalized:
+            return
         # Update the preview line while the mouse is moving.
         if event.inaxes != self.ax or not self.points:
+            return
+        if event.xdata is None or event.ydata is None:
             return
         x, y = event.xdata, event.ydata
         prev_x, prev_y = self.points[-1]
@@ -590,11 +603,16 @@ class OrthogonalPolygonDrawer(QObject):
         self.canvas.draw_idle()
 
     def on_key(self, event):
+        if not self._enabled or self._finalized:
+            return
         # Finish the polygon with Enter or Return.
         if event.key in ("enter", "return") and len(self.points) > 2:
             self._finalize()
 
     def _finalize(self):
+        if self._finalized or len(self.points) < 3:
+            return
+        self._finalized = True
         # Connect the last point back to the starting point.
         first_x, first_y = self.points[0]
         last_x, last_y = self.points[-1]
@@ -613,9 +631,12 @@ class OrthogonalPolygonDrawer(QObject):
 
     def disconnect(self):
         # Disconnect all matplotlib event handlers.
-        self.canvas.mpl_disconnect(self.cid_press)
-        self.canvas.mpl_disconnect(self.cid_move)
-        self.canvas.mpl_disconnect(self.cid_key)
+        for cid in (self.cid_press, self.cid_move, self.cid_key):
+            if cid is not None:
+                self.canvas.mpl_disconnect(cid)
+        self.cid_press = None
+        self.cid_move = None
+        self.cid_key = None
 
     def clear(self):
         """Remove the drawn polygon and reset the internal state."""
@@ -637,12 +658,17 @@ class OrthogonalPolygonDrawer(QObject):
 
         # 3) Clear the point list.
         self.points.clear()
+        self._finalized = False
 
         # 4) Refresh the canvas.
         self.canvas.draw_idle()
 
     def enable(self, flag):
         if flag:
+            if self._enabled:
+                return
+            self._enabled = True
+            self._finalized = False
             # Connect canvas events.
             self.cid_press = self.canvas.mpl_connect(
                 "button_press_event", self.on_press
@@ -650,8 +676,9 @@ class OrthogonalPolygonDrawer(QObject):
             self.cid_move = self.canvas.mpl_connect("motion_notify_event", self.on_move)
             self.cid_key = self.canvas.mpl_connect("key_press_event", self.on_key)
         else:
-            if hasattr(self, "cid_press"):
+            if self._enabled:
                 self.disconnect()
+            self._enabled = False
 
 
 class ConfigDataSettingsDialog(QDialog):
