@@ -1,12 +1,12 @@
 import os
 import sys
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 
 from loguru import logger
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QPixmap
-from PySide6.QtWidgets import QApplication, QSplashScreen
+from PySide6.QtWidgets import QApplication, QMessageBox, QSplashScreen
 
 from mainWindow import KLuxMap, resource_path
 
@@ -15,6 +15,7 @@ APP_NAME = "KLuxMap"
 APP_DIR = Path.home() / f".{APP_NAME}"
 LOG_DIR = APP_DIR / "log"
 SPLASH_IMAGE = "splash_screen.png"
+LICENSE_EXPIRY_DATE = date(2026, 6, 16)
 
 
 def _setup_logging() -> None:
@@ -45,6 +46,17 @@ def main():
 
     QApplication.setStyle("Fusion")
     app = QApplication(sys.argv)
+    if date.today() >= LICENSE_EXPIRY_DATE:
+        QMessageBox.critical(
+            None,
+            "License Expired",
+            "The license period for this application has expired.\n\n"
+            "Please contact your administrator or software provider "
+            "to renew the license before continuing to use this application.",
+        )
+        logger.warning(f"Application blocked by license expiry: {LICENSE_EXPIRY_DATE}")
+        sys.exit(1)
+
     app.setStyleSheet(
         """     
         QGroupBox {font-family: Segoe UI; font-weight: bold; font-size: 12px;} 
