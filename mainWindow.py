@@ -131,10 +131,6 @@ class KLuxMap(QMainWindow):
         self.resetProject_action.setStatusTip("Reset Data in project folder")
         project_menu.addAction(self.resetProject_action)
 
-        self.closeProject_action = QAction("Close Project Folder", self)
-        self.closeProject_action.setStatusTip("Close this project folder")
-        project_menu.addAction(self.closeProject_action)
-
         self.exit_action = QAction("&Exit", self)
         self.exit_action.setShortcut("Ctrl+X")
         self.exit_action.setStatusTip("Exit application")
@@ -173,7 +169,6 @@ class KLuxMap(QMainWindow):
         help_menu.addAction(self.about_action)
 
         self.resetProject_action.setEnabled(False)
-        self.closeProject_action.setEnabled(False)
         self.convert_action.setEnabled(False)
         self.import_SEC_files_action.setEnabled(False)
         self.config_action.setEnabled(False)
@@ -186,7 +181,6 @@ class KLuxMap(QMainWindow):
         self.openProject_action.triggered.connect(self._open_project_folder)
         self.recentProject_action.triggered.connect(self._open_recent_project)
         self.resetProject_action.triggered.connect(self._reset_project_folder)
-        self.closeProject_action.triggered.connect(self._close_project_folder)
         self.convert_action.triggered.connect(self._convert_data_to_csv)
         self.import_SEC_files_action.triggered.connect(self._import_sec_files)
         self.exit_action.triggered.connect(self.close)
@@ -345,7 +339,6 @@ class KLuxMap(QMainWindow):
         self.recentProject_action.setEnabled(enabled)
 
     def _set_menu_actions_enabled(self, action=True):
-        self.closeProject_action.setEnabled(action)
         self.resetProject_action.setEnabled(action)
         self.convert_action.setEnabled(action)
         self.import_SEC_files_action.setEnabled(action)
@@ -361,13 +354,6 @@ class KLuxMap(QMainWindow):
             self._update_recent_project_action()
         else:
             self.recentProject_action.setEnabled(False)
-
-    def _close_project_folder(self):
-        project_path = config.get("project_path", "")
-        if project_path:
-            logger.info(f"Project closed: {project_path}")
-        self._set_menu_actions_enabled(False)
-        self.projectReset.emit()
 
     def _create_project_folder(self):
         dlg = CreateProjectDialog(parent=self)
