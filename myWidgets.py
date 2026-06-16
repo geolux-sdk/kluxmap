@@ -528,8 +528,18 @@ class OrthogonalPolygonDrawer(QObject):
             return
         x, y = event.xdata, event.ydata
 
+        # Right click force-finishes the polygon regardless of the close threshold.
+        if event.button == 3:
+            if len(self.points) > 2:
+                self._finalize()
+            return
+
+        # Ignore non-left clicks for normal point creation.
+        if event.button != 1:
+            return
+
         # The first left click always adds the starting point.
-        if not self.points and event.button == 1:
+        if not self.points:
             self.points.append((x, y))
             self.canvas.draw_idle()
             return
