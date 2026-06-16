@@ -19,6 +19,7 @@ python -m nuitka "%SRC%" ^
   --deployment ^
   --include-data-files=./img/*.png=./img/ ^
   --include-data-files=./IGRF14.shc=./IGRF14.shc ^
+  --include-data-files=./minilzo.dll=./minilzo.dll ^
   --windows-console-mode=disable ^
   --windows-icon-from-ico=./img/viewer.ico ^
   --output-dir="%OUT_DIR%"

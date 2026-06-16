@@ -183,8 +183,6 @@ class DataConverter:
         candidates = [
             os.path.join(base_dir, "minilzo.dll"),
             os.path.join(base_dir, "minilzo.so"),
-            os.path.join(base_dir, "test", "MAGHAWK_V2025_DATA", "minilzo.dll"),
-            os.path.join(base_dir, "test", "MAGHAWK_V2025_DATA", "minilzo.so"),
         ]
         errors = []
         for path in candidates:
