@@ -72,6 +72,9 @@ DEFAULT_CONTOUR_PARAMS = {
 KMZ_COLORBAR_GAP_FRACTION = 0.06
 KMZ_COLORBAR_WIDTH_FRACTION = 0.16
 KMZ_COLORBAR_HEIGHT_FRACTION = 0.78
+MIN_GRID_SIZE = 2
+MAX_GRID_SIZE = 500
+MAX_GRID_CELLS = 250000
 
 
 class ColorbarRangeDialog(QDialog):
@@ -1116,6 +1119,74 @@ class KrigingPlotDialog(QDialog):
         outside = ~hull_path.contains_points(grid_points, radius=1e-9)
         return outside.reshape(gx.shape)
 
+    def _read_grid_inputs(self):
+        try:
+            grid_size_x = int(self.grid_size_x_input.text())
+            grid_size_y = int(self.grid_size_y_input.text())
+            grid_min_x = float(self.grid_size_x_min.text())
+            grid_max_x = float(self.grid_size_x_max.text())
+            grid_min_y = float(self.grid_size_y_min.text())
+            grid_max_y = float(self.grid_size_y_max.text())
+        except ValueError:
+            QMessageBox.warning(
+                self,
+                "Input Error",
+                "Please enter numeric values for range and grid number inputs.",
+            )
+            return None
+
+        if not (MIN_GRID_SIZE <= grid_size_x <= MAX_GRID_SIZE):
+            QMessageBox.warning(
+                self,
+                "Input Error",
+                f"X GridNum must be between {MIN_GRID_SIZE} and {MAX_GRID_SIZE}.",
+            )
+            return None
+
+        if not (MIN_GRID_SIZE <= grid_size_y <= MAX_GRID_SIZE):
+            QMessageBox.warning(
+                self,
+                "Input Error",
+                f"Y GridNum must be between {MIN_GRID_SIZE} and {MAX_GRID_SIZE}.",
+            )
+            return None
+
+        if grid_size_x * grid_size_y > MAX_GRID_CELLS:
+            QMessageBox.warning(
+                self,
+                "Input Error",
+                "Grid size is too large. Please keep "
+                f"X GridNum * Y GridNum <= {MAX_GRID_CELLS}.",
+            )
+            return None
+
+        range_values = [grid_min_x, grid_max_x, grid_min_y, grid_max_y]
+        if not all(np.isfinite(range_values)):
+            QMessageBox.warning(
+                self,
+                "Input Error",
+                "Range values must be finite numbers.",
+            )
+            return None
+
+        if grid_min_x >= grid_max_x:
+            QMessageBox.warning(
+                self,
+                "Input Error",
+                "X Range minimum must be less than maximum.",
+            )
+            return None
+
+        if grid_min_y >= grid_max_y:
+            QMessageBox.warning(
+                self,
+                "Input Error",
+                "Y Range minimum must be less than maximum.",
+            )
+            return None
+
+        return grid_size_x, grid_size_y, grid_min_x, grid_max_x, grid_min_y, grid_max_y
+
     def run_kriging(self):
         if self._kriging_running:
             return
@@ -1139,15 +1210,21 @@ class KrigingPlotDialog(QDialog):
                 anisotropy_angle=0.0,
             )
 
-            grid_size_x = int(self.grid_size_x_input.text())
-            grid_size_y = int(self.grid_size_y_input.text())
+            grid_inputs = self._read_grid_inputs()
+            if grid_inputs is None:
+                return
+
+            (
+                grid_size_x,
+                grid_size_y,
+                grid_min_x,
+                grid_max_x,
+                grid_min_y,
+                grid_max_y,
+            ) = grid_inputs
+
             self.filters["grid_size_x"] = grid_size_x
             self.filters["grid_size_y"] = grid_size_y
-
-            grid_min_x = float(self.grid_size_x_min.text())
-            grid_max_x = float(self.grid_size_x_max.text())
-            grid_min_y = float(self.grid_size_y_min.text())
-            grid_max_y = float(self.grid_size_y_max.text())
 
             self.filters["grid_min_x"] = grid_min_x
             self.filters["grid_max_x"] = grid_max_x
