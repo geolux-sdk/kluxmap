@@ -16,7 +16,7 @@ AppPublisher={#MyAppPublisher}
 DefaultDirName={pf}\{#MyAppName}
 DefaultGroupName={#MyAppName}
 OutputDir=output
-OutputBaseFilename=KLuxMap_Setup
+OutputBaseFilename=KLuxMap_Setup_Windows_V{#MyAppVersion}
 Compression=lzma
 SolidCompression=yes
 
