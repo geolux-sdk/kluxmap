@@ -1166,7 +1166,23 @@ class LinePlotWidget(QWidget):
         return df
 
     def _open_kriging_dialog(self):
+        if self.selected_df.empty or self.tableWidget.columnCount() == 0:
+            QMessageBox.warning(
+                self,
+                "Gridding",
+                "No scanline data is available for gridding.",
+            )
+            return
+
         column_index = self.tableWidget.currentColumn()
+        if column_index < 0:
+            QMessageBox.warning(
+                self,
+                "Gridding",
+                "Please select a data column before running gridding.",
+            )
+            return
+
         col_name = self.selected_df.columns[column_index]
         parent_window = self.main_window or self.window()
         dlg = KrigingPlotDialog(
