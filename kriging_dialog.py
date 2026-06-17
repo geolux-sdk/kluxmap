@@ -350,7 +350,24 @@ class KrigingPlotDialog(QDialog):
                     for col in ("Latitude", "Longitude", "CRS_EPSG")
                     if col in df.columns and col not in base_cols
                 ]
-                valid_dfs.append(df[base_cols + optional_cols])
+                work = df[base_cols + optional_cols].copy()
+                for col in base_cols:
+                    work[col] = pd.to_numeric(work[col], errors="coerce")
+                valid_mask = np.isfinite(work[base_cols].to_numpy(dtype=float)).all(
+                    axis=1
+                )
+                removed_count = int((~valid_mask).sum())
+                if removed_count:
+                    logger.warning(
+                        f"'{name}' skipped {removed_count} non-numeric kriging row(s)."
+                    )
+                work = work.loc[valid_mask]
+                if work.empty:
+                    logger.warning(
+                        f"'{name}' has no numeric X/Y/'{col_name}' rows and will be skipped."
+                    )
+                    continue
+                valid_dfs.append(work)
             else:
                 logger.warning(
                     f"[Warning] '{name}' is missing '{col_name}' or X/Y columns and will be skipped."
@@ -366,12 +383,22 @@ class KrigingPlotDialog(QDialog):
             return
 
         merged_df = pd.concat(valid_dfs, ignore_index=True)
+        if len(merged_df) < 3:
+            QMessageBox.critical(
+                self,
+                "Error",
+                "Kriging requires at least 3 numeric rows with X, Y, "
+                f"and '{col_name}' values.",
+            )
+            self.reject()
+            return
+
         self._source_epsg = self._extract_source_epsg(merged_df)
         self._source_latlon_bounds = self._extract_source_latlon_bounds(merged_df)
 
-        self.x = merged_df["X"].to_numpy()
-        self.y = merged_df["Y"].to_numpy()
-        self.z = merged_df[col_name].to_numpy()
+        self.x = merged_df["X"].to_numpy(dtype=float)
+        self.y = merged_df["Y"].to_numpy(dtype=float)
+        self.z = merged_df[col_name].to_numpy(dtype=float)
 
         self._init_ui()
         QTimer.singleShot(100, self.run_kriging)
