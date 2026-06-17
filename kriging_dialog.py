@@ -198,11 +198,18 @@ class ShadeSettingsDialog(QDialog):
                 "Vert Exag and Fraction must be greater than 0.",
             )
             return None
-        if values["alpha_scale"] < 0 or values["alpha_max"] < 0:
+        if values["alpha_scale"] < 0:
             QMessageBox.warning(
                 self,
                 "Input Error",
-                "Alpha Scale and Alpha Max must be 0 or greater.",
+                "Alpha Scale must be 0 or greater.",
+            )
+            return None
+        if not (0.0 <= values["alpha_max"] <= 1.0):
+            QMessageBox.warning(
+                self,
+                "Input Error",
+                "Alpha Max must be between 0 and 1.",
             )
             return None
         return values
@@ -826,10 +833,11 @@ class KrigingPlotDialog(QDialog):
                 vert_exag=shade_params["vert_exag"],
                 fraction=shade_params["fraction"],
             )
+            alpha_max = float(np.clip(shade_params["alpha_max"], 0.0, 1.0))
             shadow_alpha = np.clip(
                 (1.0 - shade) * shade_params["alpha_scale"],
                 0.0,
-                shade_params["alpha_max"],
+                alpha_max,
             )
             hull_mask = grid.get("hull_mask")
             if hull_mask is not None:
@@ -1292,10 +1300,11 @@ class KrigingPlotDialog(QDialog):
                         vert_exag=shade_params["vert_exag"],
                         fraction=shade_params["fraction"],
                     )
+                    alpha_max = float(np.clip(shade_params["alpha_max"], 0.0, 1.0))
                     shadow_alpha = np.clip(
                         (1.0 - shade) * shade_params["alpha_scale"],
                         0.0,
-                        shade_params["alpha_max"],
+                        alpha_max,
                     )
                     if hull_mask is not None:
                         shadow_alpha = np.where(hull_mask, 0.0, shadow_alpha)
