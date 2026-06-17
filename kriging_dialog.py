@@ -69,6 +69,10 @@ DEFAULT_CONTOUR_PARAMS = {
     "label_fontsize": 7,
 }
 
+KMZ_COLORBAR_GAP_FRACTION = 0.06
+KMZ_COLORBAR_WIDTH_FRACTION = 0.16
+KMZ_COLORBAR_HEIGHT_FRACTION = 0.78
+
 
 class ColorbarRangeDialog(QDialog):
     """Dialog to set or restore the colorbar range."""
@@ -608,14 +612,16 @@ class KrigingPlotDialog(QDialog):
         ).strip("_")
         return stem or "kriging"
 
-    def _build_overlay_coordinates(self):
-        if not self._last_kriging_grid:
-            return None
+    @staticmethod
+    def _latlon_bounds_from_xy_bounds(min_x, max_x, min_y, max_y):
+        return {
+            "north": max_y,
+            "south": min_y,
+            "east": max_x,
+            "west": min_x,
+        }
 
-        grid_min_x, grid_max_x, grid_min_y, grid_max_y = self._last_kriging_grid[
-            "bounds"
-        ]
-
+    def _project_bounds_to_overlay_coordinates(self, min_x, max_x, min_y, max_y):
         if self._source_epsg is not None:
             try:
                 transformer = Transformer.from_crs(
@@ -623,8 +629,8 @@ class KrigingPlotDialog(QDialog):
                     "EPSG:4326",
                     always_xy=True,
                 )
-                xs = [grid_min_x, grid_max_x, grid_max_x, grid_min_x]
-                ys = [grid_min_y, grid_min_y, grid_max_y, grid_max_y]
+                xs = [min_x, max_x, max_x, min_x]
+                ys = [min_y, min_y, max_y, max_y]
                 lons, lats = transformer.transform(xs, ys)
                 coords = [
                     (float(lon), float(lat))
@@ -635,25 +641,99 @@ class KrigingPlotDialog(QDialog):
                     return {"type": "quad", "coords": coords}
             except Exception as err:
                 logger.warning(f"Kriging KML coordinate transform failed: {err}")
+        return None
+
+    @staticmethod
+    def _is_latlon_bounds(min_x, max_x, min_y, max_y):
+        return -180.0 <= min_x <= max_x <= 180.0 and -90.0 <= min_y <= max_y <= 90.0
+
+    def _build_overlay_coordinates(self):
+        if not self._last_kriging_grid:
+            return None
+
+        grid_min_x, grid_max_x, grid_min_y, grid_max_y = self._last_kriging_grid[
+            "bounds"
+        ]
+
+        projected = self._project_bounds_to_overlay_coordinates(
+            grid_min_x,
+            grid_max_x,
+            grid_min_y,
+            grid_max_y,
+        )
+        if projected is not None:
+            return projected
 
         if self._source_latlon_bounds is not None:
-            return {"type": "box", "bounds": self._source_latlon_bounds}
+            return {"type": "box", "bounds": dict(self._source_latlon_bounds)}
 
-        if (
-            -180.0 <= grid_min_x <= grid_max_x <= 180.0
-            and -90.0 <= grid_min_y <= grid_max_y <= 90.0
-        ):
+        if self._is_latlon_bounds(grid_min_x, grid_max_x, grid_min_y, grid_max_y):
             return {
                 "type": "box",
-                "bounds": {
-                    "north": grid_max_y,
-                    "south": grid_min_y,
-                    "east": grid_max_x,
-                    "west": grid_min_x,
-                },
+                "bounds": self._latlon_bounds_from_xy_bounds(
+                    grid_min_x,
+                    grid_max_x,
+                    grid_min_y,
+                    grid_max_y,
+                ),
             }
 
         return None
+
+    def _build_colorbar_coordinates(self):
+        if not self._last_kriging_grid:
+            return None
+
+        grid_min_x, grid_max_x, grid_min_y, grid_max_y = self._last_kriging_grid[
+            "bounds"
+        ]
+        grid_width = grid_max_x - grid_min_x
+        grid_height = grid_max_y - grid_min_y
+        if grid_width <= 0 or grid_height <= 0:
+            return None
+
+        if self._source_epsg is not None:
+            gap = grid_width * KMZ_COLORBAR_GAP_FRACTION
+            bar_width = grid_width * KMZ_COLORBAR_WIDTH_FRACTION
+            bar_height = grid_height * KMZ_COLORBAR_HEIGHT_FRACTION
+            center_y = (grid_min_y + grid_max_y) / 2.0
+            return self._project_bounds_to_overlay_coordinates(
+                grid_max_x + gap,
+                grid_max_x + gap + bar_width,
+                center_y - bar_height / 2.0,
+                center_y + bar_height / 2.0,
+            )
+
+        if self._source_latlon_bounds is not None:
+            bounds = dict(self._source_latlon_bounds)
+        elif self._is_latlon_bounds(grid_min_x, grid_max_x, grid_min_y, grid_max_y):
+            bounds = self._latlon_bounds_from_xy_bounds(
+                grid_min_x,
+                grid_max_x,
+                grid_min_y,
+                grid_max_y,
+            )
+        else:
+            return None
+
+        lon_width = bounds["east"] - bounds["west"]
+        lat_height = bounds["north"] - bounds["south"]
+        if lon_width <= 0 or lat_height <= 0:
+            return None
+
+        gap = lon_width * KMZ_COLORBAR_GAP_FRACTION
+        bar_width = lon_width * KMZ_COLORBAR_WIDTH_FRACTION
+        bar_height = lat_height * KMZ_COLORBAR_HEIGHT_FRACTION
+        center_lat = (bounds["north"] + bounds["south"]) / 2.0
+        return {
+            "type": "box",
+            "bounds": {
+                "north": center_lat + bar_height / 2.0,
+                "south": center_lat - bar_height / 2.0,
+                "east": bounds["east"] + gap + bar_width,
+                "west": bounds["east"] + gap,
+            },
+        }
 
     def _render_overlay_png(self, grid):
         grid_min_x, grid_max_x, grid_min_y, grid_max_y = grid["bounds"]
@@ -772,21 +852,51 @@ class KrigingPlotDialog(QDialog):
         finally:
             plt.close(fig)
 
-    def _build_overlay_kml(self, image_href, overlay_coordinates):
-        title = escape(f"{self.title} Kriging")
-        image_href = escape(image_href)
+    def _render_colorbar_png(self):
+        fig = plt.figure(figsize=(1.55, 4.8), dpi=220)
+        fig.patch.set_facecolor("white")
+        colorbar_ax = fig.add_axes([0.20, 0.10, 0.25, 0.78])
+        vmin, vmax = self.im.get_clim() if hasattr(self, "im") else (0.0, 1.0)
+        cmap = plt.get_cmap("jet")
+        mappable = plt.cm.ScalarMappable(cmap=cmap)
+        mappable.set_clim(vmin, vmax)
+        colorbar = fig.colorbar(mappable, cax=colorbar_ax)
+        colorbar.ax.ticklabel_format(useOffset=False, style="plain")
+        colorbar.ax.tick_params(labelsize=9, colors="black", width=0.8)
+        colorbar.ax.set_title(str(self.title), fontsize=10, pad=8, color="black")
+        colorbar.outline.set_edgecolor("black")
+        colorbar.outline.set_linewidth(0.8)
+
+        image_buffer = BytesIO()
+        try:
+            fig.savefig(
+                image_buffer,
+                format="png",
+                facecolor="white",
+                edgecolor="white",
+                bbox_inches="tight",
+                pad_inches=0.08,
+            )
+            return image_buffer.getvalue()
+        finally:
+            plt.close(fig)
+
+    def _build_ground_overlay_lines(
+        self,
+        name,
+        image_href,
+        overlay_coordinates,
+        draw_order,
+    ):
+        name = escape(str(name))
+        image_href = escape(str(image_href))
         lines = [
-            '<?xml version="1.0" encoding="UTF-8"?>',
-            '<kml xmlns="http://www.opengis.net/kml/2.2" '
-            'xmlns:gx="http://www.google.com/kml/ext/2.2">',
-            "  <Document>",
-            f"    <name>{title}</name>",
             "    <GroundOverlay>",
-            f"      <name>{title}</name>",
+            f"      <name>{name}</name>",
             "      <Icon>",
             f"        <href>{image_href}</href>",
             "      </Icon>",
-            "      <drawOrder>1</drawOrder>",
+            f"      <drawOrder>{draw_order}</drawOrder>",
         ]
 
         if overlay_coordinates["type"] == "quad":
@@ -815,9 +925,30 @@ class KrigingPlotDialog(QDialog):
                 ]
             )
 
+        lines.append("    </GroundOverlay>")
+        return lines
+
+    def _build_overlay_kml(self, overlays):
+        title = escape(f"{self.title} Kriging")
+        lines = [
+            '<?xml version="1.0" encoding="UTF-8"?>',
+            '<kml xmlns="http://www.opengis.net/kml/2.2" '
+            'xmlns:gx="http://www.google.com/kml/ext/2.2">',
+            "  <Document>",
+            f"    <name>{title}</name>",
+        ]
+        for overlay in overlays:
+            lines.extend(
+                self._build_ground_overlay_lines(
+                    overlay["name"],
+                    overlay["href"],
+                    overlay["coordinates"],
+                    overlay["draw_order"],
+                )
+            )
+
         lines.extend(
             [
-                "    </GroundOverlay>",
                 "  </Document>",
                 "</kml>",
                 "",
@@ -835,11 +966,19 @@ class KrigingPlotDialog(QDialog):
             return
 
         overlay_coordinates = self._build_overlay_coordinates()
+        colorbar_coordinates = self._build_colorbar_coordinates()
         if overlay_coordinates is None:
             QMessageBox.warning(
                 self,
                 "KMZ Export",
                 "KMZ export requires Latitude/Longitude or CRS_EPSG information.",
+            )
+            return
+        if colorbar_coordinates is None:
+            QMessageBox.warning(
+                self,
+                "KMZ Export",
+                "Could not determine a valid colorbar location.",
             )
             return
 
@@ -863,14 +1002,31 @@ class KrigingPlotDialog(QDialog):
 
         try:
             overlay_png = self._render_overlay_png(self._last_kriging_grid)
-            overlay_kml = self._build_overlay_kml("overlay.png", overlay_coordinates)
+            colorbar_png = self._render_colorbar_png()
+            overlay_kml = self._build_overlay_kml(
+                [
+                    {
+                        "name": f"{self.title} Kriging",
+                        "href": "kriging.png",
+                        "coordinates": overlay_coordinates,
+                        "draw_order": 1,
+                    },
+                    {
+                        "name": f"{self.title} Colorbar",
+                        "href": "colorbar.png",
+                        "coordinates": colorbar_coordinates,
+                        "draw_order": 2,
+                    },
+                ]
+            )
             with zipfile.ZipFile(
                 kmz_path,
                 mode="w",
                 compression=zipfile.ZIP_DEFLATED,
             ) as kmz:
                 kmz.writestr("doc.kml", overlay_kml)
-                kmz.writestr("overlay.png", overlay_png)
+                kmz.writestr("kriging.png", overlay_png)
+                kmz.writestr("colorbar.png", colorbar_png)
             QMessageBox.information(
                 self,
                 "KMZ Export",
