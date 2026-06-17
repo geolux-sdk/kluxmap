@@ -616,14 +616,15 @@ class KrigingPlotDialog(QDialog):
             QMessageBox.warning(self, "Warning", "No plot to save.")
             return
 
-        default_path = os.path.join(
-            config.get("project_path"), f"{self.title}_kriging.png"
-        )
+        project_path = config.get("project_path", "") or ""
+        default_dir = Path(project_path) / "results" if project_path else Path.cwd()
+        default_dir.mkdir(parents=True, exist_ok=True)
+        default_path = default_dir / f"{self._safe_filename_stem(self.title)}_kriging.png"
 
         file_path, _ = QFileDialog.getSaveFileName(
             self,
             "Save Plot",
-            default_path,
+            str(default_path),
             "PNG Image (*.png);;JPEG Image (*.jpg);;All Files (*)",
         )
 
