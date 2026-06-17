@@ -339,6 +339,7 @@ class KrigingPlotDialog(QDialog):
         self._last_kriging_grid = None
         self._source_epsg = None
         self._source_latlon_bounds = None
+        self._kriging_running = False
 
         valid_dfs = []
         for name, df in df_dict.items():
@@ -453,15 +454,15 @@ class KrigingPlotDialog(QDialog):
 
         ctrl_layout.addStretch(1)
 
-        run_btn = QPushButton("Run Kriging")
-        run_btn.setFixedWidth(100)
-        run_btn.clicked.connect(self.run_kriging)
-        ctrl_layout.addWidget(run_btn)
+        self.run_btn = QPushButton("Run Kriging")
+        self.run_btn.setFixedWidth(100)
+        self.run_btn.clicked.connect(self.run_kriging)
+        ctrl_layout.addWidget(self.run_btn)
 
-        save_btn = QPushButton("Save Plot")
-        save_btn.setFixedWidth(100)
-        save_btn.clicked.connect(self.save_plot)
-        ctrl_layout.addWidget(save_btn)
+        self.save_btn = QPushButton("Save Plot")
+        self.save_btn.setFixedWidth(100)
+        self.save_btn.clicked.connect(self.save_plot)
+        ctrl_layout.addWidget(self.save_btn)
 
         layout.addWidget(self.create_toolbar())
         layout.addLayout(ctrl_layout)
@@ -514,6 +515,32 @@ class KrigingPlotDialog(QDialog):
             self.open_contour_settings()
         elif action == self.actionKmlExport:
             self.export_kml()
+
+    def _set_kriging_controls_enabled(self, enabled):
+        widgets = [
+            "run_btn",
+            "save_btn",
+            "variogram_cb",
+            "shade_cb",
+            "contour_cb",
+            "scatter_cb",
+            "clip_to_hull_cb",
+            "grid_size_x_min",
+            "grid_size_x_max",
+            "grid_size_x_input",
+            "grid_size_y_min",
+            "grid_size_y_max",
+            "grid_size_y_input",
+        ]
+        for attr in widgets:
+            widget = getattr(self, attr, None)
+            if widget is not None:
+                widget.setEnabled(enabled)
+
+        for action in ("actionShade", "actionContour", "actionKmlExport"):
+            toolbar_action = getattr(self, action, None)
+            if toolbar_action is not None:
+                toolbar_action.setEnabled(enabled)
 
     def open_shade_settings(self):
         dlg = ShadeSettingsDialog(
@@ -1063,7 +1090,12 @@ class KrigingPlotDialog(QDialog):
         return outside.reshape(gx.shape)
 
     def run_kriging(self):
+        if self._kriging_running:
+            return
+        self._kriging_running = True
+        self._set_kriging_controls_enabled(False)
         QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        QApplication.processEvents()
         try:
             variogram = self.variogram_cb.currentText()
             self.filters["variogram"] = variogram
@@ -1259,6 +1291,8 @@ class KrigingPlotDialog(QDialog):
             QMessageBox.critical(self, "Error", f"Kriging failed:\n{e}")
         finally:
             QApplication.restoreOverrideCursor()
+            self._set_kriging_controls_enabled(True)
+            self._kriging_running = False
 
     def on_canvas_click(self, event):
         """Handle clicks on the canvas, specifically on the colorbar."""
