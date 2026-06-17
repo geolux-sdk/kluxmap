@@ -26,10 +26,10 @@ SetupIconFile=.\img\viewer.ico
 ArchitecturesAllowed=x64
 ArchitecturesInstallIn64BitMode=x64
 
-; 설치할 때 쓸 언어 (한국어 + 영어)
+; 설치할 때 쓸 언어 (영어 + 한국어)
 [Languages]
-Name: "korean"; MessagesFile: "compiler:Languages\Korean.isl"
 Name: "english"; MessagesFile: "compiler:Default.isl"
+Name: "korean"; MessagesFile: "compiler:Languages\Korean.isl"
 
 [Tasks]
 ; 바탕화면 아이콘 만들기 옵션
