@@ -1,4 +1,8 @@
 import os
+from io import BytesIO
+from pathlib import Path
+from xml.sax.saxutils import escape
+import zipfile
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -6,7 +10,9 @@ import pandas as pd
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.colors import LightSource
 from matplotlib.path import Path as MplPath
+from loguru import logger
 from pykrige.ok import OrdinaryKriging
+from pyproj import Transformer
 from PySide6.QtCore import QSize, Qt, QTimer
 from PySide6.QtGui import QAction, QIcon
 from PySide6.QtWidgets import (
@@ -326,11 +332,20 @@ class KrigingPlotDialog(QDialog):
         self.shade_im = None
         self.colorbar = None
         self.scatter_plot = None
+        self._last_kriging_grid = None
+        self._source_epsg = None
+        self._source_latlon_bounds = None
 
         valid_dfs = []
         for name, df in df_dict.items():
             if {"X", "Y", col_name}.issubset(df.columns):
-                valid_dfs.append(df[["X", "Y", col_name]])
+                base_cols = ["X", "Y", col_name]
+                optional_cols = [
+                    col
+                    for col in ("Latitude", "Longitude", "CRS_EPSG")
+                    if col in df.columns and col not in base_cols
+                ]
+                valid_dfs.append(df[base_cols + optional_cols])
             else:
                 logger.warning(
                     f"[Warning] '{name}' is missing '{col_name}' or X/Y columns and will be skipped."
@@ -346,6 +361,8 @@ class KrigingPlotDialog(QDialog):
             return
 
         merged_df = pd.concat(valid_dfs, ignore_index=True)
+        self._source_epsg = self._extract_source_epsg(merged_df)
+        self._source_latlon_bounds = self._extract_source_latlon_bounds(merged_df)
 
         self.x = merged_df["X"].to_numpy()
         self.y = merged_df["Y"].to_numpy()
@@ -476,7 +493,7 @@ class KrigingPlotDialog(QDialog):
         )
         self.actionKmlExport = QAction(
             _icon_from_candidates("imag_kml_export.png"),
-            "KML Export",
+            "KMZ Export",
             self,
         )
         self.toolbar.actionTriggered.connect(self.on_toolbar_action_triggered)
@@ -491,6 +508,8 @@ class KrigingPlotDialog(QDialog):
             self.open_shade_settings()
         elif action == self.actionContour:
             self.open_contour_settings()
+        elif action == self.actionKmlExport:
+            self.export_kml()
 
     def open_shade_settings(self):
         dlg = ShadeSettingsDialog(
@@ -548,6 +567,323 @@ class KrigingPlotDialog(QDialog):
                 )
             except Exception as e:
                 QMessageBox.critical(self, "Error", f"Failed to save plot:\n{e}")
+
+    @staticmethod
+    def _extract_source_epsg(df):
+        if "CRS_EPSG" not in df.columns:
+            return None
+
+        epsg_values = pd.to_numeric(df["CRS_EPSG"], errors="coerce").dropna()
+        if epsg_values.empty:
+            return None
+
+        try:
+            return int(epsg_values.iloc[0])
+        except Exception:
+            return None
+
+    @staticmethod
+    def _extract_source_latlon_bounds(df):
+        if not {"Latitude", "Longitude"}.issubset(df.columns):
+            return None
+
+        lats = pd.to_numeric(df["Latitude"], errors="coerce").to_numpy()
+        lons = pd.to_numeric(df["Longitude"], errors="coerce").to_numpy()
+        valid = np.isfinite(lats) & np.isfinite(lons)
+        if not valid.any():
+            return None
+
+        return {
+            "north": float(np.max(lats[valid])),
+            "south": float(np.min(lats[valid])),
+            "east": float(np.max(lons[valid])),
+            "west": float(np.min(lons[valid])),
+        }
+
+    @staticmethod
+    def _safe_filename_stem(text):
+        stem = "".join(
+            ch if ch.isalnum() or ch in ("-", "_") else "_"
+            for ch in str(text)
+        ).strip("_")
+        return stem or "kriging"
+
+    def _build_overlay_coordinates(self):
+        if not self._last_kriging_grid:
+            return None
+
+        grid_min_x, grid_max_x, grid_min_y, grid_max_y = self._last_kriging_grid[
+            "bounds"
+        ]
+
+        if self._source_epsg is not None:
+            try:
+                transformer = Transformer.from_crs(
+                    f"EPSG:{int(self._source_epsg)}",
+                    "EPSG:4326",
+                    always_xy=True,
+                )
+                xs = [grid_min_x, grid_max_x, grid_max_x, grid_min_x]
+                ys = [grid_min_y, grid_min_y, grid_max_y, grid_max_y]
+                lons, lats = transformer.transform(xs, ys)
+                coords = [
+                    (float(lon), float(lat))
+                    for lon, lat in zip(lons, lats)
+                    if np.isfinite(lon) and np.isfinite(lat)
+                ]
+                if len(coords) == 4:
+                    return {"type": "quad", "coords": coords}
+            except Exception as err:
+                logger.warning(f"Kriging KML coordinate transform failed: {err}")
+
+        if self._source_latlon_bounds is not None:
+            return {"type": "box", "bounds": self._source_latlon_bounds}
+
+        if (
+            -180.0 <= grid_min_x <= grid_max_x <= 180.0
+            and -90.0 <= grid_min_y <= grid_max_y <= 90.0
+        ):
+            return {
+                "type": "box",
+                "bounds": {
+                    "north": grid_max_y,
+                    "south": grid_min_y,
+                    "east": grid_max_x,
+                    "west": grid_min_x,
+                },
+            }
+
+        return None
+
+    def _render_overlay_png(self, grid):
+        grid_min_x, grid_max_x, grid_min_y, grid_max_y = grid["bounds"]
+        z_interp = np.ma.array(grid["z"], copy=True)
+        valid_values = np.ma.compressed(z_interp)
+
+        fig = plt.figure(figsize=(8, 8), dpi=200)
+        ax = fig.add_axes([0, 0, 1, 1])
+        ax.set_axis_off()
+
+        cmap = plt.get_cmap("jet").copy()
+        cmap.set_bad((0.0, 0.0, 0.0, 0.0))
+        vmin, vmax = self.im.get_clim() if hasattr(self, "im") else (None, None)
+        im = ax.pcolormesh(
+            grid["gx"],
+            grid["gy"],
+            z_interp,
+            shading="auto",
+            cmap=cmap,
+            vmin=vmin,
+            vmax=vmax,
+        )
+
+        if self.shade_cb.isChecked() and valid_values.size:
+            shade_params = dict(DEFAULT_SHADE_PARAMS)
+            shade_params.update(self.filters.get("shade_params", {}))
+            ls = LightSource(
+                azdeg=shade_params["azdeg"],
+                altdeg=shade_params["altdeg"],
+            )
+            shade = ls.hillshade(
+                np.ma.filled(z_interp, float(np.mean(valid_values))),
+                vert_exag=shade_params["vert_exag"],
+                fraction=shade_params["fraction"],
+            )
+            shadow_alpha = np.clip(
+                (1.0 - shade) * shade_params["alpha_scale"],
+                0.0,
+                shade_params["alpha_max"],
+            )
+            hull_mask = grid.get("hull_mask")
+            if hull_mask is not None:
+                shadow_alpha = np.where(hull_mask, 0.0, shadow_alpha)
+            shadow_rgba = np.zeros(shade.shape + (4,), dtype=float)
+            shadow_rgba[..., 3] = shadow_alpha
+            ax.imshow(
+                shadow_rgba,
+                extent=[grid_min_x, grid_max_x, grid_min_y, grid_max_y],
+                origin="lower",
+                aspect="auto",
+                zorder=im.get_zorder() + 1,
+            )
+
+        if self.contour_cb.isChecked() and valid_values.size:
+            contour_params = dict(DEFAULT_CONTOUR_PARAMS)
+            contour_params.update(self.filters.get("contour_params", {}))
+            z_min = float(np.min(valid_values))
+            z_max = float(np.max(valid_values))
+            levels = None
+            if z_min < z_max:
+                if contour_params["scale"] == "log" and z_min > 0 and z_max > 0:
+                    levels = np.geomspace(
+                        z_min,
+                        z_max,
+                        int(contour_params["levels"]),
+                    )
+                elif contour_params["scale"] != "log":
+                    levels = np.linspace(
+                        z_min,
+                        z_max,
+                        int(contour_params["levels"]),
+                    )
+            if levels is not None:
+                contours = ax.contour(
+                    grid["gx"],
+                    grid["gy"],
+                    z_interp,
+                    levels=levels,
+                    colors="black",
+                    linewidths=contour_params["linewidth"],
+                    alpha=contour_params["alpha"],
+                )
+                ax.clabel(
+                    contours,
+                    fmt="%.1f",
+                    fontsize=contour_params["label_fontsize"],
+                    inline=True,
+                )
+
+        if self.scatter_cb.isChecked():
+            ax.scatter(
+                self.x,
+                self.y,
+                s=8,
+                c="k",
+                marker="o",
+                edgecolors="white",
+                linewidths=0.3,
+                alpha=0.8,
+                zorder=im.get_zorder() + 2,
+            )
+
+        ax.set_xlim(grid_min_x, grid_max_x)
+        ax.set_ylim(grid_min_y, grid_max_y)
+        ax.set_aspect("auto")
+
+        image_buffer = BytesIO()
+        try:
+            fig.savefig(
+                image_buffer,
+                format="png",
+                transparent=True,
+                pad_inches=0,
+            )
+            return image_buffer.getvalue()
+        finally:
+            plt.close(fig)
+
+    def _build_overlay_kml(self, image_href, overlay_coordinates):
+        title = escape(f"{self.title} Kriging")
+        image_href = escape(image_href)
+        lines = [
+            '<?xml version="1.0" encoding="UTF-8"?>',
+            '<kml xmlns="http://www.opengis.net/kml/2.2" '
+            'xmlns:gx="http://www.google.com/kml/ext/2.2">',
+            "  <Document>",
+            f"    <name>{title}</name>",
+            "    <GroundOverlay>",
+            f"      <name>{title}</name>",
+            "      <Icon>",
+            f"        <href>{image_href}</href>",
+            "      </Icon>",
+            "      <drawOrder>1</drawOrder>",
+        ]
+
+        if overlay_coordinates["type"] == "quad":
+            coord_text = " ".join(
+                f"{lon:.10f},{lat:.10f},0"
+                for lon, lat in overlay_coordinates["coords"]
+            )
+            lines.extend(
+                [
+                    "      <gx:LatLonQuad>",
+                    f"        <coordinates>{coord_text}</coordinates>",
+                    "      </gx:LatLonQuad>",
+                ]
+            )
+        else:
+            bounds = overlay_coordinates["bounds"]
+            lines.extend(
+                [
+                    "      <LatLonBox>",
+                    f"        <north>{bounds['north']:.10f}</north>",
+                    f"        <south>{bounds['south']:.10f}</south>",
+                    f"        <east>{bounds['east']:.10f}</east>",
+                    f"        <west>{bounds['west']:.10f}</west>",
+                    "        <rotation>0</rotation>",
+                    "      </LatLonBox>",
+                ]
+            )
+
+        lines.extend(
+            [
+                "    </GroundOverlay>",
+                "  </Document>",
+                "</kml>",
+                "",
+            ]
+        )
+        return "\n".join(lines)
+
+    def export_kml(self):
+        if self._last_kriging_grid is None or not hasattr(self, "im"):
+            QMessageBox.information(
+                self,
+                "KMZ Export",
+                "No kriging image to export. Please run kriging first.",
+            )
+            return
+
+        overlay_coordinates = self._build_overlay_coordinates()
+        if overlay_coordinates is None:
+            QMessageBox.warning(
+                self,
+                "KMZ Export",
+                "KMZ export requires Latitude/Longitude or CRS_EPSG information.",
+            )
+            return
+
+        project_path = config.get("project_path", "") or ""
+        default_dir = Path(project_path) / "results" if project_path else Path.cwd()
+        default_dir.mkdir(parents=True, exist_ok=True)
+        default_path = default_dir / f"{self._safe_filename_stem(self.title)}_kriging.kmz"
+
+        file_path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Export KMZ",
+            str(default_path),
+            "KMZ files (*.kmz);;All files (*)",
+        )
+        if not file_path:
+            return
+
+        kmz_path = Path(file_path)
+        if kmz_path.suffix.lower() != ".kmz":
+            kmz_path = kmz_path.with_suffix(".kmz")
+
+        try:
+            overlay_png = self._render_overlay_png(self._last_kriging_grid)
+            overlay_kml = self._build_overlay_kml("overlay.png", overlay_coordinates)
+            with zipfile.ZipFile(
+                kmz_path,
+                mode="w",
+                compression=zipfile.ZIP_DEFLATED,
+            ) as kmz:
+                kmz.writestr("doc.kml", overlay_kml)
+                kmz.writestr("overlay.png", overlay_png)
+            QMessageBox.information(
+                self,
+                "KMZ Export",
+                "KMZ export completed.\n\n"
+                f"KMZ file:\n{kmz_path}",
+            )
+        except Exception as err:
+            logger.exception("Kriging KMZ export failed")
+            QMessageBox.critical(
+                self,
+                "KMZ Export",
+                f"Failed to export KMZ:\n{err}",
+            )
 
     def _build_hull_mask(self, gx, gy):
         points = np.column_stack([self.x, self.y])
@@ -749,6 +1085,13 @@ class KrigingPlotDialog(QDialog):
             self.ax.ticklabel_format(useOffset=False, style="plain", axis="x")
             self.ax.ticklabel_format(useOffset=False, style="plain", axis="y")
             self.ax.set_aspect("equal", adjustable="box")
+            self._last_kriging_grid = {
+                "gx": gx.copy(),
+                "gy": gy.copy(),
+                "z": np.ma.array(z_interp, copy=True),
+                "bounds": (grid_min_x, grid_max_x, grid_min_y, grid_max_y),
+                "hull_mask": hull_mask.copy() if hull_mask is not None else None,
+            }
             self.canvas.draw()
         except ValueError:
             QMessageBox.warning(
