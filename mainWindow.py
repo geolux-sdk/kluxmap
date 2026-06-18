@@ -367,6 +367,7 @@ class KLuxMap(QMainWindow):
             return
         direction_degree = selection.get("direction", 0)
         direction_degree_str = selection.get("direction_str", "")
+        config.clear()
         config.set_path(str(Path(folder_path) / "project_settings.json"))
 
         Path(folder_path).mkdir(exist_ok=True)
