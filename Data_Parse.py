@@ -113,8 +113,6 @@ class DataConverter:
                 df_sensor_data[col], size=5, mode="nearest"
             )
 
-        df_sensor_data["Mag"] = ((df_sensor_data**2).sum(axis=1) ** 0.5) * 1000
-
         for col in ["Longitude", "Latitude", "Altitude"]:
             s = df_position[col].astype(float)
             # (선택) 스파이크 제거/스무딩 후
@@ -131,6 +129,9 @@ class DataConverter:
         df_mean = (
             df_all.groupby("__group").mean(numeric_only=True).reset_index(drop=True)
         )
+        df_mean["Mag"] = (
+            (df_mean[["Sensor_X", "Sensor_Y", "Sensor_Z"]] ** 2).sum(axis=1) ** 0.5
+        ) * 1000
 
         # --- 시간 필드 및 Counter 생성 ---
         formatted_date = f"20{date[:2]}-{date[2:4]}-{date[4:]}"
@@ -420,7 +421,6 @@ class DataConverter:
             ["Year", "Month", "Day", "Hours", "Minutes", "Seconds", "Miliseconds"]
         ].copy()
         df_samples = pd.concat([df_time, df_position, df_sensor_data], axis=1)
-        df_samples["Mag"] = ((df_sensor_data**2).sum(axis=1) ** 0.5) * 1000
 
         num_groups = len(df_samples) // subsample
         if num_groups == 0:
@@ -431,6 +431,9 @@ class DataConverter:
         df_samples["__group"] = np.repeat(np.arange(num_groups), subsample)
         grouped = df_samples.groupby("__group")
         df_mean = grouped.mean(numeric_only=True).reset_index(drop=True)
+        df_mean["Mag"] = (
+            (df_mean[["Sensor_X", "Sensor_Y", "Sensor_Z"]] ** 2).sum(axis=1) ** 0.5
+        ) * 1000
         df_first = grouped[["Year", "Month", "Day"]].first().reset_index(drop=True)
         df_mean[["Year", "Month", "Day"]] = df_first[["Year", "Month", "Day"]]
 
