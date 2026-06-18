@@ -14,7 +14,7 @@ class DataConverter:
     # 고정 상수
     ADS131A_SCALE_FACTOR = 4.0 / 0x800000
     VOLTAGE_TO_VALUE = 100 / 3.0
-    CONVERSION_GAIN = VOLTAGE_TO_VALUE * ADS131A_SCALE_FACTOR
+    CONVERSION_GAIN = VOLTAGE_TO_VALUE * ADS131A_SCALE_FACTOR * 1000
     LONGITUDE_FRAC_LEN = 5
     LATITUDE_FRAC_LEN = 5
     ALTITUDE_FRAC_LEN = 1
@@ -131,7 +131,7 @@ class DataConverter:
         )
         df_mean["Mag"] = (
             (df_mean[["Sensor_X", "Sensor_Y", "Sensor_Z"]] ** 2).sum(axis=1) ** 0.5
-        ) * 1000
+        )
 
         # --- 시간 필드 및 Counter 생성 ---
         formatted_date = f"20{date[:2]}-{date[2:4]}-{date[4:]}"
@@ -433,7 +433,7 @@ class DataConverter:
         df_mean = grouped.mean(numeric_only=True).reset_index(drop=True)
         df_mean["Mag"] = (
             (df_mean[["Sensor_X", "Sensor_Y", "Sensor_Z"]] ** 2).sum(axis=1) ** 0.5
-        ) * 1000
+        )
         df_first = grouped[["Year", "Month", "Day"]].first().reset_index(drop=True)
         df_mean[["Year", "Month", "Day"]] = df_first[["Year", "Month", "Day"]]
 
