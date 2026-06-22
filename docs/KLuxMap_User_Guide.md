@@ -2,7 +2,7 @@
 
 이 문서는 KLuxMap에서 프로젝트를 만들고, 자기장 데이터를 변환하고, 비행 경로와 스캔 라인을 확인한 뒤 Kriging 결과를 저장하거나 Google Earth용 KMZ로 내보내는 기본 절차를 정리한 사용자 가이드입니다.
 
-현재 문서는 KLuxMap V2.0.4 기준입니다.
+현재 문서는 KLuxMap V2.0.5 기준입니다.
 
 ## 1. 기본 흐름
 
@@ -294,7 +294,7 @@ Windows 설치 파일은 Inno Setup 스크립트 `Installer.iss`로 생성합니
 현재 출력 파일명 형식:
 
 ```text
-KLuxMap_Setup_Windows_V2.0.4.exe
+KLuxMap_Setup_Windows_V2.0.5.exe
 ```
 
 설치 언어 선택 화면에서는 영어가 먼저 표시되고, 한국어가 다음에 표시됩니다.

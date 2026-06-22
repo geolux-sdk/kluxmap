@@ -3,7 +3,7 @@
 ; ============================
 
 #define MyAppName      "KLuxMap"
-#define MyAppVersion   "2.0.4"
+#define MyAppVersion   "2.0.5"
 #define MyAppPublisher "KIGAM & GEOLUX"
 #define MyAppExeName   "KLuxMap.exe"
 #define MyAppDistDir   "build\main.dist"
