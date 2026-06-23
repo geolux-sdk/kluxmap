@@ -1,93 +1,73 @@
-# KMAGHUNTERS_NEO
+# KLuxMap
 
+KLuxMap은 KIGAM/GEOLUX 자기장 데이터 처리 및 시각화 도구입니다.
+프로젝트 생성, Mag Hawk 데이터 변환, 비행 경로 확인, scan line 처리,
+Kriging 결과 생성, PNG/KMZ 저장, Google Earth 확인 흐름을 지원합니다.
 
+## Download
 
-## Getting started
+GitHub를 기준 배포 위치로 사용합니다.
 
-To make it easy for you to get started with GitLab, here's a list of recommended next steps.
+- Latest release: https://github.com/geolux-sdk/kluxmap/releases/latest
+- All releases: https://github.com/geolux-sdk/kluxmap/releases
+- Tags: https://github.com/geolux-sdk/kluxmap/tags
+- Current version: `V2.0.5`
+- Installer asset: `KLuxMap_Setup_Windows_V2.0.5.exe`
 
-Already a pro? Just edit this README.md and make it your own. Want to make it easy? [Use the template at the bottom](#editing-this-readme)!
+릴리스 페이지에 설치 파일이 등록되어 있으면 해당 버전의
+`KLuxMap_Setup_Windows_V*.exe` 파일을 내려받아 설치합니다.
+릴리스 asset이 없는 태그는 GitHub tag의 source code archive만 제공될 수 있습니다.
 
-## Add your files
+## Version History
 
-- [ ] [Create](https://docs.gitlab.com/ee/user/project/repository/web_editor.html#create-a-file) or [upload](https://docs.gitlab.com/ee/user/project/repository/web_editor.html#upload-a-file) files
-- [ ] [Add files using the command line](https://docs.gitlab.com/topics/git/add_files/#add-files-to-a-git-repository) or push an existing Git repository with the following command:
+### V2.0.5
 
-```
-cd existing_repo
-git remote add origin https://gitlab.com/python3962536/kmaghunters_neo.git
-git branch -M main
-git push -uf origin main
-```
+- 새 프로젝트 생성 전 설정 초기화 처리
+- Sensor scaling 계산을 `CONVERSION_GAIN` 기준으로 정리
+- Sensor 평균 이후 Mag 계산 오류 수정
+- 앱 제목, 설치 스크립트, 사용자 가이드의 버전 표기를 `2.0.5`로 갱신
 
-## Integrate with your tools
+### V2.0.4
 
-- [ ] [Set up project integrations](https://gitlab.com/python3962536/kmaghunters_neo/-/settings/integrations)
+- KLuxMap 사용자 가이드 추가
+- Kriging KMZ export 및 colorbar overlay 추가
+- Kriging 입력값, gridding column, shade alpha 설정 검증 강화
+- Kriging 결과를 프로젝트 `results` 폴더에 저장
+- 설치 파일명에 Windows 플랫폼과 버전 표기 반영
+- 설치 언어 표시 순서를 English 우선으로 정리
 
-## Collaborate with your team
+### V2.0.3
 
-- [ ] [Invite team members and collaborators](https://docs.gitlab.com/ee/user/project/members/)
-- [ ] [Create a new merge request](https://docs.gitlab.com/ee/user/project/merge_requests/creating_merge_requests.html)
-- [ ] [Automatically close issues from merge requests](https://docs.gitlab.com/ee/user/project/issues/managing_issues.html#closing-issues-automatically)
-- [ ] [Enable merge request approvals](https://docs.gitlab.com/ee/user/project/merge_requests/approvals/)
-- [ ] [Set auto-merge](https://docs.gitlab.com/user/project/merge_requests/auto_merge/)
+- Mag Hawk V2025 변환 지원 추가
+- Mag Hawk V2025 DAT 포맷 문서 추가
+- `minilzo.dll`을 Nuitka 빌드에 포함
+- 기존 프로젝트 열기 동작을 `project_settings.json` 기준으로 정리
+- 라이선스 만료 확인 추가
+- Boundary polygon 우클릭 종료 및 이벤트 충돌 방지 처리
 
-## Test and Deploy
+### V2.0.2
 
-Use the built-in continuous integration in GitLab.
+- 라인 번호 정렬 방식 변경
+- Splash 화면 크기 조정
+- Kriging 사선 영역 제외 처리
+- 함수명 및 코드 정리
 
-- [ ] [Get started with GitLab CI/CD](https://docs.gitlab.com/ee/ci/quick_start/)
-- [ ] [Analyze your code for known vulnerabilities with Static Application Security Testing (SAST)](https://docs.gitlab.com/ee/user/application_security/sast/)
-- [ ] [Deploy to Kubernetes, Amazon EC2, or Amazon ECS using Auto Deploy](https://docs.gitlab.com/ee/topics/autodevops/requirements.html)
-- [ ] [Use pull-based deployments for improved Kubernetes management](https://docs.gitlab.com/ee/user/clusters/agent/)
-- [ ] [Set up protected environments](https://docs.gitlab.com/ee/ci/environments/protected_environments.html)
+### v2.0.1
 
-***
+- 이전 2.0.x 릴리스 기준 태그
 
-# Editing this README
+## Documentation
 
-When you're ready to make this README your own, just edit this file and use the handy template below (or feel free to structure it however you want - this is just a starting point!). Thanks to [makeareadme.com](https://www.makeareadme.com/) for this template.
+- User guide: [docs/KLuxMap_User_Guide.md](docs/KLuxMap_User_Guide.md)
+- Mag Hawk V2025 DAT format: [docs/MagHawk_V2025_DAT_Format.md](docs/MagHawk_V2025_DAT_Format.md)
 
-## Suggestions for a good README
+## Build And Packaging
 
-Every project is different, so consider which of these sections apply to yours. The sections used in the template are suggestions for most open source projects. Also keep in mind that while a README can be too long and detailed, too long is better than too short. If you think your README is too long, consider utilizing another form of documentation rather than cutting out information.
+- Application entry point: `main.py`
+- Nuitka build script: `nuitka_gen_ex.bat`
+- Windows installer script: `Installer.iss`
+- Runtime resources: `img/`, `IGRF14.shc`, `minilzo.dll`
 
-## Name
-Choose a self-explaining name for your project.
-
-## Description
-Let people know what your project can do specifically. Provide context and add a link to any reference visitors might be unfamiliar with. A list of Features or a Background subsection can also be added here. If there are alternatives to your project, this is a good place to list differentiating factors.
-
-## Badges
-On some READMEs, you may see small images that convey metadata, such as whether or not all the tests are passing for the project. You can use Shields to add some to your README. Many services also have instructions for adding a badge.
-
-## Visuals
-Depending on what you are making, it can be a good idea to include screenshots or even a video (you'll frequently see GIFs rather than actual videos). Tools like ttygif can help, but check out Asciinema for a more sophisticated method.
-
-## Installation
-Within a particular ecosystem, there may be a common way of installing things, such as using Yarn, NuGet, or Homebrew. However, consider the possibility that whoever is reading your README is a novice and would like more guidance. Listing specific steps helps remove ambiguity and gets people to using your project as quickly as possible. If it only runs in a specific context like a particular programming language version or operating system or has dependencies that have to be installed manually, also add a Requirements subsection.
-
-## Usage
-Use examples liberally, and show the expected output if you can. It's helpful to have inline the smallest example of usage that you can demonstrate, while providing links to more sophisticated examples if they are too long to reasonably include in the README.
-
-## Support
-Tell people where they can go to for help. It can be any combination of an issue tracker, a chat room, an email address, etc.
-
-## Roadmap
-If you have ideas for releases in the future, it is a good idea to list them in the README.
-
-## Contributing
-State if you are open to contributions and what your requirements are for accepting them.
-
-For people who want to make changes to your project, it's helpful to have some documentation on how to get started. Perhaps there is a script that they should run or some environment variables that they need to set. Make these steps explicit. These instructions could also be useful to your future self.
-
-You can also document commands to lint the code or run tests. These steps help to ensure high code quality and reduce the likelihood that the changes inadvertently break something. Having instructions for running tests is especially helpful if it requires external setup, such as starting a Selenium server for testing in a browser.
-
-## Authors and acknowledgment
-Show your appreciation to those who have contributed to the project.
-
-## License
-For open source projects, say how it is licensed.
-
-## Project status
-If you have run out of energy or time for your project, put a note at the top of the README saying that development has slowed down or stopped completely. Someone may choose to fork your project or volunteer to step in as a maintainer or owner, allowing your project to keep going. You can also make an explicit request for maintainers.
+`nuitka_gen_ex.bat` builds the standalone application and renames the generated
+executable to `KLuxMap.exe`. `Installer.iss` packages the built executable as a
+Windows installer named `KLuxMap_Setup_Windows_V<version>.exe`.
