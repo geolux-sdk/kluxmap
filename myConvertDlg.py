@@ -520,7 +520,7 @@ class ConvertDataDialog(QDialog):
         elif new_cfg["device"] == "Mag Hawk V2025":
             if "mode" in opt:
                 new_cfg["option"]["mode"] = opt["mode"]
-        elif new_cfg["device"] == "Mag Hawk Arrow":
+        elif new_cfg["device"] == "Mag Arrow":
             if "rate" in opt:
                 new_cfg["option"]["rate"] = opt["rate"]
 
@@ -710,4 +710,4 @@ def convert_with_progress(files=None, folder=None, selection=None, parent=None):
     progress.bind_worker(worker)
     worker.start()
     progress.exec_()
-    return progress.result
+    return progress.result()

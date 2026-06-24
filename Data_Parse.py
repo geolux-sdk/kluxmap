@@ -514,7 +514,7 @@ class DataConverter:
 
     def merge_csv_files_in_folder(self, folder_path, results_path, sampling_rate):
         csv_files = [f for f in os.listdir(folder_path) if f.endswith(".csv")]
-        df_list = [pd.read_csv(os.path.join(folder_path, f)) for f in sorted(csv_files)]
+        # df_list = [pd.read_csv(os.path.join(folder_path, f)) for f in sorted(csv_files)]
 
         df_list = []
         for f in sorted(csv_files):
