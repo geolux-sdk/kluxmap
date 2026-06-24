@@ -1012,7 +1012,7 @@ def browse_directory(
         return ""
 
 
-def browse_multidirectiorys(
+def browse_multidirectorys(
     parent=None,
     initial_dir: str = "",
     caption: str = "Select Directories",
@@ -1036,6 +1036,6 @@ def browse_multidirectiorys(
             return dialog.selectedFiles()
         return []
     except Exception as e:
-        logger.exception("browse_multidirectiorys failed")
+        logger.exception("browse_multidirectorys failed")
         return []
 

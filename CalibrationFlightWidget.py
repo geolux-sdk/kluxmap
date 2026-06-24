@@ -687,7 +687,7 @@ class CalibrationFlightWidget(QWidget):
 
     @Slot(str)
     def on_project_opened(self, project_path: str):
-        self._main_direiion_str = config.get('direction_str', '')
+        self._main_direction_str = config.get('direction_str', '')
         self._main_direction_degree = config.get("direction", 0)
         self.load_state_from_config()
 
