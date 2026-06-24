@@ -1410,7 +1410,9 @@ class KrigingPlotDialog(QDialog):
 
     def on_canvas_click(self, event):
         """Handle clicks on the canvas, specifically on the colorbar."""
-        if hasattr(self, "colorbar") and event.inaxes == getattr(self.colorbar, "ax", None):
+        if self.colorbar is None or not hasattr(self, "im"):
+            return
+        if event.inaxes == self.colorbar.ax:
             current_min, current_max = self.im.get_clim()
 
             dlg = ColorbarRangeDialog(self, current_min, current_max)
@@ -1421,9 +1423,10 @@ class KrigingPlotDialog(QDialog):
                     self.canvas.draw_idle()
 
     def closeEvent(self, event):
-        if hasattr(self.parent(), "_open_kriging_dialogs"):
+        parent = self.parentWindow
+        if hasattr(parent, "_open_kriging_dialogs"):
             try:
-                self.parent()._open_kriging_dialogs.remove(self)
+                parent._open_kriging_dialogs.remove(self)
             except ValueError:
                 pass
         event.accept()
