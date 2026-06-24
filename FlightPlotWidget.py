@@ -92,7 +92,6 @@ class FlightPlotWidget(QWidget):
         self._line_is_panning = False
         self._line_last_mouse_pos = None
 
-        # config.get("filters", {})  # 사용하지 않는 라인 (리뷰 #죽은코드, 2026-06-24)
         # Always start with no background map; do not persist a default map type.
         self.map_type = "none"
         self._map_pixmap: Optional[QPixmap] = None
