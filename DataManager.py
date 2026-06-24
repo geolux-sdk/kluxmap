@@ -215,6 +215,7 @@ class DataManager:
 
         except Exception as e:
             logger.exception("Error while applying flight data filters")
+            return None
 
         if df.empty:
             return None
