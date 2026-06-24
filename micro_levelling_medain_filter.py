@@ -100,14 +100,27 @@ def median2d_on(values, E, N, r_m, min_neighbors=5):
     """
     Spatial median around each point within radius r_m using E,N coordinates.
     """
+    values = np.asarray(values, float)
+    E = np.asarray(E, float)
+    N = np.asarray(N, float)
+
+    # NaN coordinates would corrupt cKDTree's spatial partitioning, returning
+    # garbage neighbours even for valid points. Build the tree from finite
+    # coordinates only and fall back to the raw value for NaN-coordinate points.
     coords = np.column_stack([E, N])
-    tree = cKDTree(coords)
-    out = np.empty(len(values), float)
-    for i in range(len(values)):
-        neigh = tree.query_ball_point(coords[i], r=float(r_m))
-        if not neigh:
+    valid = np.isfinite(E) & np.isfinite(N)
+    out = np.array(values, float)
+    if not valid.any():
+        return out
+
+    valid_idx = np.flatnonzero(valid)
+    tree = cKDTree(coords[valid_idx])
+    for i in valid_idx:
+        neigh_local = tree.query_ball_point(coords[i], r=float(r_m))
+        if not neigh_local:
             out[i] = values[i]
             continue
+        neigh = valid_idx[neigh_local]
         arr = values[neigh]
         finite = np.isfinite(arr)
         if finite.sum() < min_neighbors:
