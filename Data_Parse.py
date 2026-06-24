@@ -137,9 +137,8 @@ class DataConverter:
         formatted_date = f"20{date[:2]}-{date[2:4]}-{date[4:]}"
         df_mean.insert(0, "Date", formatted_date)
 
-        step = 1000 / subsample
-        ms_sec = df_mean["Miliseconds"].astype(int) / 1000
-        ms_adj = np.floor(ms_sec * step) / step * 1000
+        ms_int = df_mean["Miliseconds"].astype(int)
+        ms_adj = (ms_int // subsample) * subsample
 
         df_mean["Time"] = (
             str(hour).zfill(2)
@@ -442,9 +441,8 @@ class DataConverter:
         day = df_mean["Day"].astype(int).astype(str).str.zfill(2)
         df_mean.insert(0, "Date", "20" + year + "-" + month + "-" + day)
 
-        step = 1000 / subsample
-        ms_sec = df_mean["Miliseconds"].astype(int) / 1000
-        ms_adj = np.floor(ms_sec * step) / step * 1000
+        ms_int = df_mean["Miliseconds"].astype(int)
+        ms_adj = (ms_int // subsample) * subsample
 
         df_mean["Time"] = (
             df_mean["Hours"].astype(int).astype(str).str.zfill(2)
