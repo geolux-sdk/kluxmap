@@ -8,6 +8,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
+from matplotlib.figure import Figure
 from matplotlib.colors import LightSource
 from matplotlib.path import Path as MplPath
 from loguru import logger
@@ -504,7 +505,8 @@ class KrigingPlotDialog(QDialog):
         layout.addWidget(self.create_toolbar())
         layout.addLayout(ctrl_layout)
 
-        self.fig, self.ax = plt.subplots()
+        self.fig = Figure()
+        self.ax = self.fig.add_subplot(111)
         self.canvas = FigureCanvas(self.fig)
         self.canvas.mpl_connect("button_press_event", self.on_canvas_click)
         layout.addWidget(self.canvas)

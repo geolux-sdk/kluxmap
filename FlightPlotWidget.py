@@ -9,6 +9,7 @@ import pandas as pd
 import requests
 from loguru import logger
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
+from matplotlib.figure import Figure
 from pyproj import Transformer
 
 GOOGLE_MAPS_API_KEY_HARDCODED = "AIzaSyD1zF_979D6PEvhKJvI9ZvSf27UZ-MtqYw"
@@ -514,7 +515,8 @@ class FlightPlotWidget(QWidget):
     def _create_canvas_plot(self):
         """Create a canvas plot using matplotlib"""
         # Configure the matplotlib plot.
-        self.fig, self.ax = plt.subplots(figsize=(10, 8), dpi=100)
+        self.fig = Figure(figsize=(10, 8), dpi=100)
+        self.ax = self.fig.add_subplot(111)
 
         self.ax.set_title("Mag Plot")
         self.ax.set_xlabel("Easting (m)")
@@ -522,7 +524,7 @@ class FlightPlotWidget(QWidget):
         self.ax.grid(True)
         self.ax.set_aspect("equal")
 
-        plt.tight_layout(pad=1.0, w_pad=1.5, h_pad=1)
+        self.fig.tight_layout(pad=1.0, w_pad=1.5, h_pad=1)
         # Wrap the matplotlib canvas as a PyQt6 widget.
         self.canvas = FigureCanvas(self.fig)
 
@@ -534,7 +536,8 @@ class FlightPlotWidget(QWidget):
         return self.canvas
 
     def _create_line_canvas_plot(self):
-        self.line_fig, self.line_ax = plt.subplots(figsize=(10, 8), dpi=100)
+        self.line_fig = Figure(figsize=(10, 8), dpi=100)
+        self.line_ax = self.line_fig.add_subplot(111)
         self.line_ax.set_title("Line Plot")
         self.line_ax.set_xlabel("Easting (m)")
         self.line_ax.set_ylabel("Northing (m)")

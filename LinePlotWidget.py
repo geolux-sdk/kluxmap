@@ -9,6 +9,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 from loguru import logger
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
+from matplotlib.figure import Figure
 import ppigrf
 
 # Widget imports
@@ -168,7 +169,8 @@ class LinePlotWidget(QWidget):
 
     def _create_scatter_plot(self):
         # Increase the default scatter plot size for dense scanline data
-        self.scatter_fig, self.scatter_ax = plt.subplots(figsize=(8, 4), dpi=100)
+        self.scatter_fig = Figure(figsize=(8, 4), dpi=100)
+        self.scatter_ax = self.scatter_fig.add_subplot(111)
         self.scatter_ax.set_title("Mag Value (Sensor_Total)")
         self.scatter_ax.set_xlabel("Index")
         self.scatter_ax.set_ylabel("Sensor_Total")
@@ -181,7 +183,8 @@ class LinePlotWidget(QWidget):
         return self.scatter_canvas
 
     def _create_canvas_plot(self):
-        self.fig, self.ax = plt.subplots(figsize=(12, 2), dpi=100)
+        self.fig = Figure(figsize=(12, 2), dpi=100)
+        self.ax = self.fig.add_subplot(111)
         self.canvas = FigureCanvas(self.fig)
         self.canvas.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
