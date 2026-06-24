@@ -494,6 +494,9 @@ class LinePlotWidget(QWidget):
         self._line_select_start = None
         self.populate_table(df)
 
+        if df.empty or self.selected_col_name not in df.columns:
+            return
+
         col_index = df.columns.get_loc(self.selected_col_name)
         self.tableWidget.setCurrentCell(0, col_index)
         self.plot_list = [col_index]
