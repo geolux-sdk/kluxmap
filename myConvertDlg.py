@@ -553,8 +553,8 @@ class Converter(QThread):
         self.selection = selection or {}
         self._cancel = False
         self.MagHawkConverter = DataConverter()
-        proj_path = config.get("project_path")
-        saveto = self.selection.get("saveto")
+        proj_path = config.get("project_path") or ""
+        saveto = self.selection.get("saveto") or ""
         self.saved_folder_path = os.path.join(proj_path, saveto)
         os.makedirs(self.saved_folder_path, exist_ok=True)
         self.processed_folder_path = os.path.join(proj_path, ".processed")
@@ -603,10 +603,12 @@ class Converter(QThread):
                 self.failed.emit(msg)
                 return
 
-            device = self.selection.get("device")
+            device = self.selection.get("device") or ""
             logger.info(
                 f"Starting data conversion: device={device}, files={n}, destination={self.saved_folder_path}"
             )
+            processed_dir = ""
+            hemi = "Northern Hemisphere"
             if device[:8] == "Mag Hawk":
                 parent_dir = os.path.dirname(targets[0])
                 last_folder = os.path.basename(parent_dir)
