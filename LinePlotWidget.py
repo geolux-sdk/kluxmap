@@ -2,7 +2,6 @@ import os
 import math
 import shutil
 from typing import Optional
-from datetime import datetime
 
 import numpy as np
 
@@ -988,7 +987,9 @@ class LinePlotWidget(QWidget):
             elif "Date" in df.columns:
                 timestamps = pd.to_datetime(df["Date"].astype(str), errors="coerce")
             else:
-                timestamps = pd.Series([pd.Timestamp(datetime.utcnow())] * len(df))
+                timestamps = pd.Series(
+                    [pd.Timestamp.now(tz="UTC").tz_localize(None)] * len(df)
+                )
 
             igrf_vals = np.full(len(df), np.nan, dtype=float)
 

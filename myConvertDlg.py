@@ -711,5 +711,5 @@ def convert_with_progress(files=None, folder=None, selection=None, parent=None):
     worker = Converter(files, folder, selection, parent)
     progress.bind_worker(worker)
     worker.start()
-    progress.exec_()
+    progress.exec()
     return progress.result()

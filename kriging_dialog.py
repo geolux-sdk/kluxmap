@@ -1269,12 +1269,13 @@ class KrigingPlotDialog(QDialog):
                 except Exception:
                     pass
                 self.shade_im = None
-            if self.contour_set is not None and hasattr(self.contour_set, "collections"):
-                for coll in self.contour_set.collections:
-                    try:
-                        coll.remove()
-                    except Exception:
-                        pass
+            if self.contour_set is not None:
+                # matplotlib >=3.8: ContourSet is itself a Collection; .collections
+                # was removed in 3.10, so remove the set directly.
+                try:
+                    self.contour_set.remove()
+                except Exception:
+                    pass
                 self.contour_set = None
             if self.scatter_plot is not None:
                 try:
