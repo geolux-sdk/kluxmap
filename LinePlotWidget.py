@@ -786,6 +786,10 @@ class LinePlotWidget(QWidget):
         )
         diurnal_df = self._load_diurnal_df(settings)
 
+        if not self.scanline_df:
+            logger.info("Line filtering skipped because no scanline data is loaded.")
+            return
+
         for key, df in self.scanline_df.items():
             self._reset_filter_columns(df)
             filtered_mag = df["Mag"].astype(float)
@@ -795,18 +799,22 @@ class LinePlotWidget(QWidget):
             filtered_mag = self._apply_median(df, filtered_mag, settings, key)
             filtered_mag = self._apply_lowpass(df, filtered_mag, settings, key)
             filtered_mag = self._apply_calibration(df, filtered_mag, settings, key)
-        
-        last_col = df.columns[-1] if len(df.columns) else ""
-        if last_col not in [
-            "Mag_diurnal",
-            "Mag_median",
-            "Mag_lowpass",
-            "Mag_calibrated",
-            "Mag_igrf",
-        ]:
-            col_name = "Mag"
-        else:
-            col_name = last_col
+
+        # 적용 순서상 마지막으로 실제 생성된 필터 컬럼을 결정적으로 선택
+        filter_to_col = {
+            "diurnal": "Mag_diurnal",
+            "igrf": "Mag_igrf",
+            "median": "Mag_median",
+            "lowpass": "Mag_lowpass",
+            "calibration": "Mag_calibrated",
+        }
+        col_name = "Mag"
+        for f in ["diurnal", "igrf", "median", "lowpass", "calibration"]:
+            col = filter_to_col[f]
+            if f in enabled_filters and any(
+                col in d.columns for d in self.scanline_df.values()
+            ):
+                col_name = col
         filtered_mag = self._apply_micro_levelling(self.scanline_df, settings, col_name)
 
         logger.info(
