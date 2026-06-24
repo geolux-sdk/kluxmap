@@ -11,14 +11,22 @@ GitHub를 기준 배포 위치로 사용합니다.
 - Latest release: https://github.com/geolux-sdk/kluxmap/releases/latest
 - All releases: https://github.com/geolux-sdk/kluxmap/releases
 - Tags: https://github.com/geolux-sdk/kluxmap/tags
-- Current version: `V2.0.5`
-- Installer asset: `KLuxMap_Setup_Windows_V2.0.5.exe`
+- Current version: `V2.0.6`
+- Installer asset: `KLuxMap_Setup_Windows_V2.0.6.exe`
 
 릴리스 페이지에 설치 파일이 등록되어 있으면 해당 버전의
 `KLuxMap_Setup_Windows_V*.exe` 파일을 내려받아 설치합니다.
 릴리스 asset이 없는 태그는 GitHub tag의 source code archive만 제공될 수 있습니다.
 
 ## Version History
+
+### V2.0.6
+
+- 코드 리뷰 후속 수정: 비행 필터 체인 예외 처리, micro-levelling KDTree의 NaN 좌표 가드
+- Kriging 다이얼로그 colorbar 클릭·종료 정리(teardown) 가드 보강
+- deprecated API 교체(`datetime.utcnow`, `QDialog.exec_`, `ContourSet.collections`)
+- pyplot 전역 등록으로 인한 figure 누수 수정(`Figure()` 직접 생성으로 전환)
+- 오타·죽은 코드 정리, 버전 표기를 `2.0.6`으로 갱신
 
 ### V2.0.5
 
