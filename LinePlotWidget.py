@@ -1122,10 +1122,10 @@ class LinePlotWidget(QWidget):
     def _apply_calibration(self, df, filtered_mag, settings, key):
         cal_cfg = settings.get("cali_filter", {})
         if not cal_cfg.get("enabled", False):
-            return
+            return filtered_mag
         if not {"X", "Y"}.issubset(df.columns):
             logger.warning(f"{key}: Calibration skipped (missing X/Y columns)")
-            return
+            return filtered_mag
 
         start_x, end_x = df["X"].iloc[0], df["X"].iloc[-1]
         start_y, end_y = df["Y"].iloc[0], df["Y"].iloc[-1]
@@ -1139,7 +1139,7 @@ class LinePlotWidget(QWidget):
         )
         if direction is None:
             logger.warning(f"{key}: Calibration skipped (zero-length direction vector)")
-            return
+            return filtered_mag
 
         offset_key = f"offset_{direction}"
         offset = cal_cfg.get(offset_key, 0.0)
