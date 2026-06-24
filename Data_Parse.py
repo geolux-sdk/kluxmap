@@ -121,7 +121,13 @@ class DataConverter:
         # --- 전체 병합 후 subsample 평균 ---
         df_all = pd.concat([df_timestamp, df_position, df_sensor_data], axis=1)
 
+        if subsample <= 0:
+            return self._empty_output_dataframe()
+
         num_groups = len(df_all) // subsample
+        if num_groups == 0:
+            return self._empty_output_dataframe()
+
         valid_len = num_groups * subsample
         df_all = df_all.iloc[:valid_len].copy()
         df_all["__group"] = np.repeat(np.arange(num_groups), subsample)
