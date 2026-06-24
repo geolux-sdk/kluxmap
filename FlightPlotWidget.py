@@ -1913,7 +1913,7 @@ class FlightPlotWidget(QWidget):
             palette = plt.get_cmap("tab10").colors
             self._clear_legend()
             if show_cb:
-                cmap = plt.cm.get_cmap("jet")
+                cmap = plt.get_cmap("jet")
                 norm = plt.Normalize(vmin=vmin, vmax=vmax)
                 for scatter in self._scatter_by_file.values():
                     scatter.set_visible(False)
